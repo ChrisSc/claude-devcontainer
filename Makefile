@@ -1,15 +1,18 @@
 # Shortcuts for the Claude sandbox. Compose lives in .devcontainer/.
-COMPOSE := docker compose -f .devcontainer/compose.yaml
+COMPOSE  := docker compose -f .devcontainer/compose.yaml
+COMPOSEDB := $(COMPOSE) --profile db
+ENV_FILE := .devcontainer/.env
 
-.PHONY: up shell rebuild logs stop down nuke firewall doctor cp-skill
+.PHONY: up shell rebuild logs stop down nuke firewall doctor cp-skill \
+        env db-up db-down db-psql db-logs db-create db-dump db-reset
 
-up:        ## Build (if needed) and start the container
+up: env    ## Build (if needed) and start the container
 	$(COMPOSE) up -d --build
 
 shell:     ## Interactive login shell as `claude`
 	docker exec -it claude-code zsh -l
 
-rebuild:   ## Rebuild the image from scratch and restart
+rebuild: env  ## Rebuild the image from scratch and restart
 	$(COMPOSE) build --no-cache
 	$(COMPOSE) up -d
 
@@ -37,3 +40,43 @@ cp-skill:  ## Copy a skill folder into ~/.claude/skills owned by claude: make cp
 	tar -C "$(dir $(SRC:/=))" -cf - "$(notdir $(SRC:/=))" | \
 	  docker exec -i -u claude claude-code tar -C /home/claude/.claude/skills -xf -
 	@echo "copied $(notdir $(SRC:/=)) -> ~/.claude/skills (owned by claude)"
+
+# --- Database (Postgres + pgvector sidecar) -------------------------------
+
+env:       ## Generate .devcontainer/.env with a strong DB password (if missing)
+	@bash .devcontainer/gen-env.sh
+
+db-up: env  ## Start the Postgres + pgvector sidecar (claude-db)
+	$(COMPOSEDB) up -d db
+	@echo "db up -> claude-code reaches it as db:5432; host at 127.0.0.1:5432"
+
+db-down:   ## Stop & remove the db container (data volume preserved)
+	$(COMPOSEDB) rm -sf db
+
+db-psql:   ## Interactive psql in the db (optional: make db-psql DB=myproject)
+	docker exec -it claude-code psql $(if $(DB),-d $(DB),)
+
+db-logs:   ## Follow the db container logs
+	docker logs -f claude-db
+
+db-create: ## Create a project database (pgvector inherited from template1): make db-create DB=myproject
+	@test -n "$(DB)" || { echo "usage: make db-create DB=<name>"; exit 1; }
+	docker exec claude-code createdb "$(DB)"
+	@# vector is in template1 so new DBs inherit it; this is a harmless safety net.
+	docker exec claude-code psql -d "$(DB)" -c "CREATE EXTENSION IF NOT EXISTS vector;"
+	@echo "created database '$(DB)' (pgvector enabled)"
+
+db-dump:   ## Dump ALL databases to ./db-backups on the host (survives `make nuke`)
+	@mkdir -p db-backups
+	@ts=$$(date +%Y%m%d-%H%M%S); \
+	  out="db-backups/all-$$ts.sql"; \
+	  docker exec claude-code pg_dumpall --clean --if-exists > "$$out" && \
+	  echo "dumped all databases -> $$out ($$(wc -c < "$$out") bytes)"
+
+db-reset:  ## DESTROY the db data volume and re-init (e.g. after rotating the password)
+	@printf 'This deletes ALL database data (volume claude-pgdata). Continue? [y/N] '; \
+	  read ans; [ "$$ans" = "y" ] || { echo aborted; exit 1; }
+	$(COMPOSEDB) rm -sf db
+	docker volume rm claude-pgdata
+	$(COMPOSEDB) up -d db
+	@echo "db reset — fresh data volume initialized with the current .env password"

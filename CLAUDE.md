@@ -70,6 +70,23 @@ auto-update can reach `downloads.claude.ai`. The VS Code path re-runs the firewa
   `/usr/bin/python3` (3.11) — the prompt/tools silently use the wrong interpreter.
   The `--default --preview-features python-install-default` form adds generic
   `python`/`python3` shims to `~/.local/bin` (first on PATH); don't drop it.
+- **DB password applies only on first init of `claude-pgdata`.** The generated
+  `.devcontainer/.env` (gitignored; `make env`) is baked into the data volume
+  when Postgres first initializes — changing `.env` later does NOT re-key the
+  running DB. Use `make db-reset` (destroys data) to apply a new password. The
+  db sidecar is opt-in via the `db` compose profile (`make db-up`), and the
+  pg18 *client* in the image must match the server major (older `pg_dump` refuses
+  a newer server) — that's why the Dockerfile pulls `postgresql-client-18` from
+  PGDG, not Debian's 15.
+- **Firewall allows the real container subnet, not a guessed /24.** The compose
+  net is a /16; `init-firewall.sh` reads the actual interface CIDR so sidecars
+  (the db) stay reachable even if Docker assigns an IP outside `172.x.0.0/24`.
+  Don't revert it to the `sed`-derived /24 — that silently breaks `db` egress.
+- **Two load-bearing `db` service settings** (both have inline comments — don't
+  "simplify" them away): `PGDATA=/var/lib/postgresql/data/pgdata` (a subdir — the
+  pg18 image refuses to init at the volume mount root) and `PGHOST: ""` (the
+  shared `.env` injects `PGHOST=db` client vars into the *server* container too,
+  which would point its healthcheck at itself over TCP).
 
 ## File map
 - `Dockerfile` — base + all build-time installs; `install-tools.sh` does the

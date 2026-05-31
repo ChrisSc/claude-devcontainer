@@ -134,6 +134,36 @@ If you do use `docker cp` host -> container, fix the two things it gets wrong:
 Skills copied to `~/.claude/skills` persist across rebuilds (they live in the
 `claude-config` volume) and are picked up the next time you start `claude`.
 
+## Database (Postgres + pgvector)
+
+A shared Postgres 18 + `pgvector` sidecar (`claude-db`) is available so you don't
+re-cobble a database per project. It's **opt-in** via the `db` compose profile —
+nothing starts unless you ask:
+
+```bash
+make db-up                  # start the sidecar (generates .env on first run)
+make db-create DB=myproj    # one DB per project, with pgvector enabled
+make db-psql DB=myproj      # interactive psql
+make db-dump                # dump all DBs to ./db-backups (survives `make nuke`)
+make db-down                # stop it (data volume preserved)
+```
+
+- **One server, many databases** — `make db-create DB=<name>` per project instead
+  of a container each.
+- **pgvector on by default** — `vector` is enabled in `template1`, so the default
+  `claude` DB and every database you create (including bare `createdb`) already
+  have it. No manual `CREATE EXTENSION`.
+- **Access:** from `claude-code` as `db:5432` (credentials are pre-injected as
+  `$DATABASE_URL` / `PG*` env vars); from the host at `127.0.0.1:5432` for GUI
+  tools like TablePlus/DBeaver.
+- **Secret:** a strong password is generated into `.devcontainer/.env` (gitignored,
+  `0600`) by `make env`/`db-up` and injected into both containers — never
+  committed, never hardcoded. It's baked into the data volume on first init;
+  rotating it means `make db-reset` (destroys data). `.env.example` is the tracked
+  template.
+- **Persistence:** data lives in the `claude-pgdata` volume (survives rebuilds;
+  `make nuke`/`make db-reset` destroy it).
+
 ## Network posture
 
 The firewall is **default-deny outbound**. If something can't reach the network:

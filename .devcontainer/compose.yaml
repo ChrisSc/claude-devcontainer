@@ -22,6 +22,11 @@ services:
     user: claude
     init: true                       # docker-init as PID1: reaps zombies, forwards signals
     working_dir: /workspace
+    # DB secrets (PG* + DATABASE_URL) injected from the generated .env. Optional
+    # so `docker compose` still works before `make env` has created it.
+    env_file:
+      - path: .env
+        required: false
     environment:
       # Firewall posture: strict (default) | permissive | dev
       FIREWALL_MODE: ${FIREWALL_MODE:-strict}
@@ -39,6 +44,44 @@ services:
     # mem_limit: 8g
     # cpus: 4
 
+  # Shared Postgres + pgvector sidecar. Opt-in: only starts with the `db` profile
+  # (`make db-up`). One server, many databases — run `createdb <project>` per
+  # project instead of spinning a new container each time. Reachable from
+  # claude-code as `db:5432` (Docker DNS) and from the host at 127.0.0.1:5432.
+  db:
+    image: pgvector/pgvector:pg18
+    container_name: claude-db
+    profiles: [db]
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # PGDATA must be a SUBDIR of the mounted volume, not the mount root. On a
+      # named volume the mount root is 0755 root:root; the entrypoint's
+      # `chmod 0700 || :` can fail silently there, so postgres starts against a
+      # 0755 dir and FATALs ("data directory has invalid permissions"). With a
+      # subdir, initdb creates it fresh as 0700/postgres. (Official image rec.)
+      PGDATA: /var/lib/postgresql/data/pgdata
+      # The shared .env also injects libpq client vars (PGHOST=db, ...) into this
+      # server container; force the healthcheck to the local socket so it doesn't
+      # try to reach "db" over TCP before DNS/listener are up.
+      PGHOST: ""
+    ports:
+      - "127.0.0.1:5432:5432"        # localhost only — host GUI tools, never public
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Runs ONLY on fresh cluster init (empty data dir): enables pgvector in the
+      # default DB + template1 so every database (incl. bare `createdb`) inherits
+      # it. No-op on an already-initialized volume — re-key/re-run via db-reset.
+      - ./db-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-claude} -d $${POSTGRES_DB:-claude}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
 volumes:
   workspace:
     name: claude-workspace
@@ -48,3 +91,5 @@ volumes:
     name: claude-bashhistory
   pnpm-store:
     name: claude-pnpm-store
+  pgdata:
+    name: claude-pgdata

@@ -181,14 +181,19 @@ if [ -f "$EXTRA_ALLOWLIST" ]; then
 fi
 
 # Allow the host /24 (so host-side tooling / port-forwards work).
-HOST_IP="$(ip route | awk '/default/ {print $3; exit}')"
-if [ -n "${HOST_IP:-}" ]; then
-    HOST_NETWORK="$(echo "$HOST_IP" | sed 's#\.[0-9]*$#.0/24#')"
-    log "host network ${HOST_NETWORK}"
-    iptables -A INPUT  -s "$HOST_NETWORK" -j ACCEPT
-    iptables -A OUTPUT -d "$HOST_NETWORK" -j ACCEPT
+# Allow the container's OWN Docker subnet so peer containers (the db sidecar,
+# any future sidecar) and the gateway are reachable. Use the REAL prefix from the
+# interface — NOT a guessed /24. The compose network is a /16; a sidecar that
+# lands at 172.x.1.y is outside a /24 and would die with `no route to host`.
+# iptables masks the address to the network, so a host-bit CIDR is fine.
+FW_IFACE="$(ip route | awk '/default/ {print $5; exit}')"
+CONTAINER_CIDR="$(ip -o -f inet addr show "${FW_IFACE:-eth0}" 2>/dev/null | awk '{print $4; exit}')"
+if [ -n "${CONTAINER_CIDR:-}" ]; then
+    log "container subnet ${CONTAINER_CIDR}"
+    iptables -A INPUT  -s "$CONTAINER_CIDR" -j ACCEPT
+    iptables -A OUTPUT -d "$CONTAINER_CIDR" -j ACCEPT
 else
-    warn "could not detect host network"
+    warn "could not detect container subnet"
 fi
 
 # ---------------------------------------------------------------------------

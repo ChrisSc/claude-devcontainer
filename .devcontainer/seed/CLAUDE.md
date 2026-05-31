@@ -112,7 +112,26 @@ Installed via the native installer; auto-updates at container start (from the
 allowlisted `downloads.claude.ai`). Manual: `claude update`. Health check:
 `claude doctor`. If an update times out, see §2 (firewall).
 
-## 9. Pointers
+## 9. Database (Postgres 18 + pgvector)
+A shared Postgres server with the `vector` extension runs as a sidecar
+(`claude-db`). Opt-in: start it with `make db-up` (off by default).
+- Reach it from here as host **`db`**, port **5432**. Credentials are already in
+  the environment, so `psql` / `pg_dump` / client libraries auto-connect:
+  `PGHOST=db`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, and `$DATABASE_URL`
+  (`postgresql://claude:<pw>@db:5432/claude`). Never hardcode the password --
+  read `$DATABASE_URL` or the `PG*` vars.
+- Quick check: `psql -c '\l'` or `psql "$DATABASE_URL" -c 'select version();'`.
+- **One server, many databases.** Per project, give it its own DB rather than a
+  new container: `make db-create DB=myproject`, then `psql -d myproject` or
+  `DATABASE_URL=postgresql://$PGUSER:$PGPASSWORD@db:5432/myproject`.
+- **pgvector is enabled by default** — `vector` is installed in `template1`, so
+  the default `claude` DB and EVERY new database (incl. bare `createdb`) already
+  have it. No `CREATE EXTENSION` needed.
+- Data persists in the `claude-pgdata` volume (survives rebuilds; `make nuke` /
+  `make db-reset` destroy it). Back up with `make db-dump` -> ./db-backups (host).
+- If `db` won't resolve/connect, the sidecar likely isn't running: `make db-up`.
+
+## 10. Pointers
 - Firewall: `/usr/local/bin/init-firewall.sh`; extras
   `/etc/claude-firewall/extra-allowlist.txt`.
 - Shell: `~/.zshrc`, aliases `~/.config/zsh/aliases.zsh`, prompt

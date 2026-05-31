@@ -17,7 +17,9 @@ FROM node:24-bookworm
 ARG TZ=America/Los_Angeles
 ENV TZ="${TZ}" \
     DEBIAN_FRONTEND=noninteractive \
-    DEVCONTAINER=true
+    DEVCONTAINER=true \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
 
 # ---------------------------------------------------------------------------
 # 1. Base system + developer apt packages (+ GitHub CLI from its official repo)
@@ -45,6 +47,20 @@ RUN set -eux; \
     # Debian ships these under alternate binary names — add the canonical ones.
     ln -sf "$(command -v fdfind)" /usr/local/bin/fd; \
     ln -sf "$(command -v batcat)" /usr/local/bin/bat; \
+    apt-get clean; rm -rf /var/lib/apt/lists/*
+
+# PostgreSQL 18 client (psql, pg_dump, pg_dumpall, createdb) for the db sidecar.
+# MUST match the server major: an older pg_dump refuses to dump a newer server
+# ("server version: 18; pg_dump version: 15; aborting"). Debian only ships 15, so
+# pull the client from the official PGDG apt repo.
+RUN set -eux; \
+    install -d /usr/share/postgresql-common/pgdg; \
+    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+        -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc; \
+    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release; echo "$VERSION_CODENAME")-pgdg main" \
+        > /etc/apt/sources.list.d/pgdg.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends postgresql-client-18; \
     apt-get clean; rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------

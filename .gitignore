@@ -2,6 +2,13 @@
 # data). Local-only — never push.
 .claude/
 
+# Generated DB secrets (strong password). Never commit; .env.example is the
+# tracked template. Matches .env in any directory.
+.env
+
+# Local database backups produced by `make db-dump`.
+db-backups/
+
 # OS / editor cruft
 .DS_Store
 *.swp
