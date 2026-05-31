@@ -1,0 +1,183 @@
+# Claude Code Dev Container
+
+A modernized, security-sandboxed home for [Claude Code](https://claude.com/claude-code),
+derived from the official [`anthropics/claude-code/.devcontainer`](https://github.com/anthropics/claude-code/tree/main/.devcontainer).
+
+- **Base:** Node 24 (LTS) on Debian bookworm. Runs on **macOS/Apple Silicon
+  (arm64)** and **Windows WSL2/Intel (amd64)** — builds native to the host, no
+  emulation (see [Platform support](#platform-support)).
+- **User:** `claude` (passwordless sudo), zsh + starship.
+- **Languages:** Node 24 / TypeScript / pnpm / tsx, Python 3.14 via `uv` + `ruff`
+  + `pyright`, Playwright + Chromium (baked in).
+- **Toolbelt:** ripgrep, fd, bat, eza, zoxide, fzf, jq, yq, delta, gh, lazygit,
+  bottom, dust, procs, sd, hyperfine, tokei, tldr, …
+- **Security:** default-deny egress firewall with an expanded allowlist, a
+  host-editable extra-allowlist, and a `FIREWALL_MODE=permissive` escape hatch.
+- **Persistence:** named volumes for workspace, Claude config/auth, shell
+  history, and the pnpm store.
+
+Compose project (container group): **`claude`** · container: **`claude-code`**.
+
+## Platform support
+
+Works on two host setups; the same Dockerfile builds **native to the host arch**
+(no emulation, no `--platform` flag):
+
+| Host | Arch | Notes |
+|---|---|---|
+| macOS, Apple Silicon | arm64 | Docker Desktop. Works out of the box. |
+| Windows, Intel/AMD | amd64 | Docker Desktop with the **WSL2 backend**, run from inside WSL2. |
+
+**Windows / WSL2 setup (one-time):**
+
+1. Install Docker Desktop and enable **Settings → General → Use the WSL2 based
+   engine**, plus **Settings → Resources → WSL Integration** for your distro.
+   The WSL2 backend is required — the firewall uses `NET_ADMIN` + iptables/ipset,
+   which need the WSL2 Linux kernel; the legacy Hyper-V backend can't load them.
+2. **Clone the repo *inside* the WSL2 filesystem** (e.g. `~/claude-sandbox`), not
+   under `/mnt/c/...`. The Windows-mounted path loses Unix exec bits and is much
+   slower for Docker I/O.
+3. Run the same commands as below from your WSL2 shell.
+
+Line endings are forced to LF (`.gitattributes` + a `sed` guard in the
+Dockerfile), so a Windows checkout won't corrupt the shell scripts. If you ever
+see `bad interpreter: ...^M`, your editor rewrote a script to CRLF — re-checkout
+or run `sed -i 's/\r$//'` on it.
+
+## Run it (standalone)
+
+```bash
+# build + start (firewall, CLAUDE.md seed, and claude auto-update run on start)
+docker compose -f .devcontainer/compose.yaml up -d --build
+
+# drop into an interactive login shell as `claude`
+docker exec -it claude-code zsh -l
+```
+
+Or use the `Makefile` shortcuts: `make up`, `make shell`, `make rebuild`,
+`make logs`, `make stop`, `make down`, `make nuke` (removes volumes),
+`make firewall` (re-apply egress rules), `make doctor` (`claude doctor`).
+
+## Run it (VS Code)
+
+Open the folder and **"Reopen in Container"** — `devcontainer.json` references the
+same `compose.yaml`, so you get the identical environment with the Claude Code,
+ESLint, Prettier, GitLens, Python, Pylance, Ruff, and Playwright extensions
+preinstalled.
+
+## First run
+
+```bash
+claude            # authenticate Claude Code
+gh auth login     # GitHub auth (persists in the ~/.claude volume)
+git config --global user.name  "Your Name"
+git config --global user.email "you@example.com"
+```
+
+Since `/workspace` is an isolated volume, bring code in by cloning
+(GitHub is allowlisted): `git clone https://github.com/you/repo /workspace/repo`.
+
+## What persists
+
+Only these **named volumes** survive a rebuild. Everything else in the container
+filesystem — including anything you create in `~/` (e.g. a `~/projects` folder) —
+survives `stop`/`start` but is **wiped by `make rebuild`** (and `make down`/`up`).
+
+| Path | Volume | Holds |
+|---|---|---|
+| `/workspace` | `claude-workspace` | your code — put all durable work here |
+| `~/.claude` | `claude-config` | Claude state/auth, added skills, `gh`/`git`/`ssh` creds |
+| `/commandhistory` | `claude-bashhistory` | shell history |
+| `~/.local/share/pnpm` | `claude-pnpm-store` | pnpm content store |
+
+`make nuke` (`down -v`) is the only command that deletes these volumes. Volumes
+are not host folders — move code in/out with `git` or `docker cp` (below), not Finder.
+
+## Copying files in and out
+
+The volumes aren't host directories, so use `docker cp` to move things across the
+boundary. Syntax: `docker cp <src> <dst>`, where the container side is
+`claude-code:<path>`.
+
+```bash
+# Host -> container: a single file into the workspace
+docker cp ./config.toml claude-code:/workspace/config.toml
+
+# Host -> container: a folder (example: install a skill into the persistent
+# ~/.claude volume, so it survives rebuilds)
+docker cp ~/dev/my-skill claude-code:/home/claude/.claude/skills/my-skill
+
+# Container -> host: pull a result back out
+docker cp claude-code:/workspace/out.csv ./out.csv
+```
+
+`docker cp` preserves the **host** file's numeric owner and mode, which the
+container does not interpret as the `claude` user — so fix both afterward:
+
+- **Ownership** (the copied tree lands owned by an unmapped uid, not `claude`):
+  ```bash
+  docker exec -u root claude-code chown -R claude:claude /home/claude/.claude/skills/my-skill
+  ```
+- **Mode is copied verbatim.** A script that wasn't `+x` on the host arrives
+  non-executable (→ `command not found` under `sudo`). `chmod +x` it on the host
+  before copying, or in the container after. See *Troubleshooting the firewall*.
+
+Skills copied to `~/.claude/skills` persist across rebuilds (they live in the
+`claude-config` volume) and are picked up the next time you start `claude`.
+
+## Network posture
+
+The firewall is **default-deny outbound**. If something can't reach the network:
+
+- Check the allowlist: `sudo ipset list allowed-domains`.
+- Add a host: append to `.devcontainer/config/extra-allowlist.txt` (mounted at
+  `/etc/claude-firewall/extra-allowlist.txt`), then
+  `docker exec claude-code sudo /usr/local/bin/init-firewall.sh`.
+- Open egress entirely: `FIREWALL_MODE=permissive docker compose -f .devcontainer/compose.yaml up -d`.
+
+## Troubleshooting the firewall
+
+**Symptom: `no route to host` / `connect: Timeout` to a host, but DNS resolves.**
+That's the firewall's `REJECT` rule — the destination IP isn't in the
+`allowed-domains` ipset. `dig` works (UDP 53 is always allowed) while `:443`
+connects fail. Fix by allowlisting the host (see Network posture) and re-running
+`make firewall`.
+
+**Symptom: `make firewall` itself times out fetching `api.github.com/meta`**, and
+afterwards GitHub (and anything covered by GitHub's IP ranges) is unreachable.
+This was a bug fixed in `init-firewall.sh`: `iptables -F` flushes rules but *not*
+the default policy, so a re-run inherited the previous run's `OUTPUT DROP` and
+blocked its own bootstrap fetch. The script now resets policies to `ACCEPT`
+during reconfiguration and clamps back to `DROP` at the end. If you see this on
+an **old running container** (started before the fix), push the current script in
+and re-run:
+
+```bash
+docker cp .devcontainer/init-firewall.sh claude-code:/usr/local/bin/init-firewall.sh
+docker exec -u root claude-code chmod +x /usr/local/bin/init-firewall.sh   # cp drops the exec bit
+make firewall
+```
+
+A successful run ends with `verified: api.github.com is reachable`. To make the
+fix permanent, `make rebuild`.
+
+**Gotcha: `sudo: /usr/local/bin/init-firewall.sh: command not found`** after a
+`docker cp` means the copied file lost its execute bit (host scripts must be
+`+x`). Restore it with the `chmod +x` line above; the repo keeps these scripts
+executable so future copies carry the bit.
+
+**Intermittent download failures** (pip/uv/playwright) usually mean a CDN rotated
+to an IP not captured at boot. Re-run `make firewall` to refresh the resolved IPs.
+
+## Layout
+
+```
+.devcontainer/
+  devcontainer.json    compose.yaml    Dockerfile
+  init-firewall.sh     entrypoint.sh   seed-claude.sh    install-tools.sh
+  config/extra-allowlist.txt
+  home/.zshrc          home/.config/{starship.toml,zsh/aliases.zsh}
+  seed/CLAUDE.md       # -> ~/.claude/CLAUDE.md on first start
+```
+
+See `.devcontainer/seed/CLAUDE.md` for the in-container orientation doc.

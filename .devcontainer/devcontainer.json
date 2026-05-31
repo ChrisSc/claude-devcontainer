@@ -1,0 +1,42 @@
+{
+  "name": "Claude Code Sandbox",
+  "dockerComposeFile": "compose.yaml",
+  "service": "claude-code",
+  "workspaceFolder": "/workspace",
+  "remoteUser": "claude",
+  // Keep the compose `command` (sleep infinity) so our ENTRYPOINT orchestration
+  // still runs; VS Code defaults this to true and would otherwise mask it.
+  "overrideCommand": false,
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "anthropic.claude-code",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "eamodio.gitlens",
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "ms-python.vscode-pylance",
+        "ms-playwright.playwright"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.codeActionsOnSave": {
+          "source.fixAll.eslint": "explicit"
+        },
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "terminal.integrated.profiles.linux": {
+          "zsh": { "path": "/usr/bin/zsh" },
+          "bash": { "path": "bash", "icon": "terminal-bash" }
+        },
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff"
+        }
+      }
+    }
+  },
+  // Idempotent safety net for the VS Code path (the ENTRYPOINT already did this).
+  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh && claude update || true",
+  "waitFor": "postStartCommand"
+}

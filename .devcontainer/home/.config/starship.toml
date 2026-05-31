@@ -1,0 +1,50 @@
+# Starship prompt — fast and informative for a container.
+# Glyphs require a Nerd Font selected in the HOST terminal; falls back gracefully.
+
+add_newline = false
+command_timeout = 1000          # container git/FS can be slow
+scan_timeout = 30
+
+format = """
+$directory$git_branch$git_status$python$nodejs$rust$cmd_duration$character"""
+
+[directory]
+truncation_length = 3
+truncate_to_repo = true
+style = "bold cyan"
+
+[git_branch]
+symbol = " "
+style = "bold purple"
+
+[git_status]
+style = "bold yellow"
+
+[cmd_duration]
+min_time = 2000
+format = "took [$duration](yellow) "
+
+[python]
+symbol = " "
+format = '[$symbol$version]($style) '
+
+[nodejs]
+symbol = " "
+format = '[$symbol$version]($style) '
+
+[rust]
+symbol = " "
+
+[character]
+success_symbol = "[❯](bold green)"
+error_symbol = "[❯](bold red)"
+
+# Disable slow / irrelevant modules in a sandbox.
+[package]
+disabled = true
+[aws]
+disabled = true
+[gcloud]
+disabled = true
+[docker_context]
+disabled = true

@@ -1,0 +1,16 @@
+# Force LF on everything Git treats as text, regardless of host OS.
+# Without this, a checkout on Windows (core.autocrlf=true) rewrites the shell
+# scripts with CRLF, and the container fails at startup with:
+#   /usr/local/bin/entrypoint.sh: bad interpreter: /usr/bin/env bash^M
+* text=auto eol=lf
+
+# Be explicit for the extensionless / executable files that MUST stay LF.
+*.sh        text eol=lf
+Dockerfile  text eol=lf
+Makefile    text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.json      text eol=lf
+*.toml      text eol=lf
+*.zshrc     text eol=lf
+.zshrc      text eol=lf

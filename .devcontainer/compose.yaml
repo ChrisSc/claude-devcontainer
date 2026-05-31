@@ -1,0 +1,50 @@
+# docker compose for the Claude Code sandbox.
+#   project (container group): claude
+#   service / container name : claude-code
+#
+# Standalone:  docker compose -f .devcontainer/compose.yaml up -d
+#              docker exec -it claude-code zsh -l
+# VS Code:     "Reopen in Container" (devcontainer.json references this file).
+name: claude
+
+services:
+  claude-code:
+    container_name: claude-code
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TZ: ${TZ:-America/Los_Angeles}
+    # Required for the iptables/ipset egress firewall (init-firewall.sh).
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    user: claude
+    init: true                       # docker-init as PID1: reaps zombies, forwards signals
+    working_dir: /workspace
+    environment:
+      # Firewall posture: strict (default) | permissive | dev
+      FIREWALL_MODE: ${FIREWALL_MODE:-strict}
+      TZ: ${TZ:-America/Los_Angeles}
+    volumes:
+      - workspace:/workspace                                   # isolated code (no host path)
+      - config:/home/claude/.claude                            # Claude state/auth/gh/git/CLAUDE.md
+      - command-history:/commandhistory                        # persistent shell history
+      - pnpm-store:/home/claude/.local/share/pnpm              # pnpm content-addressable store
+      # Host-editable extra firewall allowlist (config only, read-only).
+      - ./config/extra-allowlist.txt:/etc/claude-firewall/extra-allowlist.txt:ro
+    # Keep the box alive; the ENTRYPOINT runs firewall -> seed -> update, then execs this.
+    command: ["sleep", "infinity"]
+    # Optional guardrails so a runaway build can't starve the host (tune to taste).
+    # mem_limit: 8g
+    # cpus: 4
+
+volumes:
+  workspace:
+    name: claude-workspace
+  config:
+    name: claude-config
+  command-history:
+    name: claude-bashhistory
+  pnpm-store:
+    name: claude-pnpm-store

@@ -1,0 +1,20 @@
+# Extra firewall allowlist for the Claude sandbox.
+#
+# One hostname per line. '#' starts a comment. Edit this file on the HOST, then
+# re-apply with:   docker exec claude-code sudo /usr/local/bin/init-firewall.sh
+# (or restart the container). Mounted read-only at
+# /etc/claude-firewall/extra-allowlist.txt.
+#
+# These supplement the always-on allowlist baked into init-firewall.sh. Use this
+# instead of editing the script. For fully open egress, set FIREWALL_MODE=permissive.
+#
+# --- Examples (uncomment to enable) ---
+# crates.io                 # runtime `cargo install`
+# index.crates.io
+# static.crates.io
+# deb.debian.org            # runtime `apt-get install`
+# security.debian.org
+# huggingface.co            # ML model/dataset downloads
+# developer.mozilla.org     # docs for Claude WebFetch
+# stackoverflow.com
+github.com

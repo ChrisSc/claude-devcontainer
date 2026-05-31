@@ -1,0 +1,7 @@
+# Claude Code per-project harness state (scheduled-task locks, local session
+# data). Local-only — never push.
+.claude/
+
+# OS / editor cruft
+.DS_Store
+*.swp
