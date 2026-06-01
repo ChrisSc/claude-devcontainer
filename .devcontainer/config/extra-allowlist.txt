@@ -38,3 +38,7 @@ guce.yahoo.com
 finviz.com
 zacks.com
 tradingview.com
+
+# --- Literal IPs / CIDRs (LAN hosts, static endpoints) ---
+# A bare IPv4 address or CIDR is added straight to the firewall ipset.
+192.168.68.70

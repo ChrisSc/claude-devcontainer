@@ -226,6 +226,19 @@ if [ -f "$EXTRA_ALLOWLIST" ]; then
                 regions="${line#@aws-ip-ranges}"; regions="${regions#@aws}"
                 add_aws_ranges "$regions"
                 ;;
+            *[0-9].[0-9]*)
+                # Literal IPv4 address or CIDR (e.g. a LAN host / static IP).
+                # add_domain can't handle these — dig would treat the IP as a
+                # hostname and resolve nothing. Add straight to the ipset.
+                cidr="$(echo "$line" | tr -d '[:space:]')"
+                if [[ "$cidr" =~ ^[0-9.]+(/[0-9]{1,2})?$ ]]; then
+                    if ipset add allowed-domains "$cidr" 2>/dev/null; then
+                        log "added literal ${cidr}"
+                    fi
+                    continue
+                fi
+                add_domain "$cidr"
+                ;;
             *)
                 add_domain "$(echo "$line" | tr -d '[:space:]')"
                 ;;
