@@ -78,6 +78,16 @@ auto-update can reach `downloads.claude.ai`. The VS Code path re-runs the firewa
   pg18 *client* in the image must match the server major (older `pg_dump` refuses
   a newer server) — that's why the Dockerfile pulls `postgresql-client-18` from
   PGDG, not Debian's 15.
+- **`.env` is read at container *create* time, not start.** compose's `env_file`
+  injects `PG*`/`DATABASE_URL` only when a container is first created, so `.env`
+  must exist *before* `claude-code` is created. The `make up`/`db-up` targets
+  guarantee this (`up: env`), but VS Code "Reopen in Container" and a raw `docker
+  compose up` don't — so `devcontainer.json`'s `initializeCommand` runs
+  `gen-env.sh` on the host to close that gap. Symptom of a container born too
+  early: empty `DATABASE_URL` inside `claude-code` (psql then falls back to the
+  local socket and fails). Fix is `--force-recreate` (a plain `restart` re-reads
+  nothing). The `.env` lives on the host only — the in-container `/workspace` is an
+  isolated volume, so a missing `.env` *there* is normal, not the cause.
 - **Firewall allows the real container subnet, not a guessed /24.** The compose
   net is a /16; `init-firewall.sh` reads the actual interface CIDR so sidecars
   (the db) stay reachable even if Docker assigns an IP outside `172.x.0.0/24`.

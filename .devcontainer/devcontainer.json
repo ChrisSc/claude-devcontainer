@@ -4,6 +4,13 @@
   "service": "claude-code",
   "workspaceFolder": "/workspace",
   "remoteUser": "claude",
+  // Runs on the HOST before the container is created. Generates the gitignored
+  // .devcontainer/.env (DB secrets) so compose's `env_file` injects PG*/DATABASE_URL
+  // on first create. Without this, "Reopen in Container" (or a raw `docker compose
+  // up`) can create claude-code BEFORE `.env` exists -> no DB secrets injected, and
+  // env_file is read only at create time so a later restart won't fix it. Idempotent:
+  // gen-env.sh leaves an existing .env untouched. (`make up`/`db-up` cover the CLI path.)
+  "initializeCommand": "bash .devcontainer/gen-env.sh",
   // Keep the compose `command` (sleep infinity) so our ENTRYPOINT orchestration
   // still runs; VS Code defaults this to true and would otherwise mask it.
   "overrideCommand": false,
