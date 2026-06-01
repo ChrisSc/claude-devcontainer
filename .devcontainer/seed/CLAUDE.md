@@ -103,6 +103,11 @@ No host credentials are mounted. Authenticate once inside; it persists in the
 `~/.claude` volume:
 - `gh auth login` (config in `$GH_CONFIG_DIR=~/.claude/gh`).
 - `git config --global user.name/user.email` (`$GIT_CONFIG_GLOBAL=~/.claude/gitconfig`).
+- AWS: the `aws` CLI (v2) is baked into the image. `aws configure` / `aws sso
+  login` write to `$AWS_CONFIG_FILE=~/.claude/aws/config` +
+  `$AWS_SHARED_CREDENTIALS_FILE=~/.claude/aws/credentials`, so creds persist in the
+  volume across rebuilds. Runtime egress to AWS APIs is allowed via the firewall's
+  `@aws-ip-ranges` directive (see `config/extra-allowlist.txt`).
 - SSH for git: keep the key in the persistent `~/.claude/ssh/` volume and wire it
   via `~/.ssh/config` (a symlink — `~/.ssh` itself is NOT persistent). Make a
   passphrase-free key (so no ssh-agent is needed), register it with GitHub, and
@@ -118,12 +123,13 @@ No host credentials are mounted. Authenticate once inside; it persists in the
     IdentitiesOnly yes
   EOF
   chmod 600 ~/.claude/ssh/config
-  mkdir -p ~/.ssh && ln -sf ~/.claude/ssh/config ~/.ssh/config
   ssh -T git@github.com   # expect: "Hi <user>! You've successfully authenticated"
   ```
-  Only the `~/.ssh/config` symlink is ephemeral; the key + config in `~/.claude`
-  survive rebuilds. The `gh auth refresh` device flow prints a code — open the URL
-  on your host to approve (firewall allows github.com).
+  This is a one-time setup. The key + config in `~/.claude` survive rebuilds, and
+  `seed-claude.sh` re-creates the ephemeral `~/.ssh/config` symlink on every boot
+  (whenever `~/.claude/ssh/config` exists), so git-over-SSH works immediately after
+  a rebuild with no manual relinking. The `gh auth refresh` device flow prints a
+  code — open the URL on your host to approve (firewall allows github.com).
 
 ## 8. Updating Claude Code
 Installed via the native installer; auto-updates at container start (from the

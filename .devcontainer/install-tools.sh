@@ -12,8 +12,8 @@ set -euo pipefail
 
 DPKG_ARCH="$(dpkg --print-architecture)"   # arm64 | amd64
 case "$DPKG_ARCH" in
-    arm64) GO_ARCH=arm64; LG_ARCH=arm64 ;;
-    amd64) GO_ARCH=amd64; LG_ARCH=x86_64 ;;
+    arm64) GO_ARCH=arm64; LG_ARCH=arm64;  AWS_ARCH=aarch64 ;;
+    amd64) GO_ARCH=amd64; LG_ARCH=x86_64; AWS_ARCH=x86_64  ;;
     *) echo "ERROR: unsupported arch ${DPKG_ARCH}" >&2; exit 1 ;;
 esac
 
@@ -50,10 +50,25 @@ curl -fsSL \
     | tar -xz -C /usr/local/bin lazygit
 chmod +x /usr/local/bin/lazygit
 
+# AWS CLI v2 (official bundled installer — pinned to arch, not the v1 pip pkg).
+# Installs to /usr/local/aws-cli and symlinks aws + aws_completer into
+# /usr/local/bin (on PATH for every user). Runtime egress to AWS APIs is handled
+# separately by the firewall's @aws-ip-ranges directive; this is a build-time
+# fetch only. Credentials/config persist via AWS_CONFIG_FILE +
+# AWS_SHARED_CREDENTIALS_FILE (set in the Dockerfile, pointed at the ~/.claude
+# volume) — nothing here writes user state.
+echo "==> Installing AWS CLI v2 (${AWS_ARCH})"
+AWS_TMP="$(mktemp -d)"
+curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${AWS_ARCH}.zip" \
+    -o "${AWS_TMP}/awscliv2.zip"
+unzip -q "${AWS_TMP}/awscliv2.zip" -d "${AWS_TMP}"
+"${AWS_TMP}/aws/install"
+rm -rf "${AWS_TMP}"
+
 # Warm the tealdeer page cache into a system path (not under a runtime volume).
 echo "==> Seeding tldr pages"
 TEALDEER_CACHE_DIR=/usr/local/share/tealdeer tldr --update || \
     echo "WARN: tldr cache update failed (non-fatal)"
 
 echo "==> install-tools.sh complete"
-command -v eza zoxide starship delta btm dust procs sd hyperfine tokei tldr yq lazygit
+command -v eza zoxide starship delta btm dust procs sd hyperfine tokei tldr yq lazygit aws

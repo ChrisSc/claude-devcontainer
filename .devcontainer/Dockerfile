@@ -161,6 +161,8 @@ ENV HOME=/home/claude \
     CLAUDE_CONFIG_DIR=/home/claude/.claude \
     GH_CONFIG_DIR=/home/claude/.claude/gh \
     GIT_CONFIG_GLOBAL=/home/claude/.claude/gitconfig \
+    AWS_CONFIG_FILE=/home/claude/.claude/aws/config \
+    AWS_SHARED_CREDENTIALS_FILE=/home/claude/.claude/aws/credentials \
     PNPM_HOME=/home/claude/.local/share/pnpm \
     NODE_OPTIONS=--max-old-space-size=4096 \
     TEALDEER_CACHE_DIR=/usr/local/share/tealdeer \
