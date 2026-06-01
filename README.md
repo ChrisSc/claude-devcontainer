@@ -209,9 +209,16 @@ make db-down                # stop it (data volume preserved)
 The firewall is **default-deny outbound**. If something can't reach the network:
 
 - Check the allowlist: `sudo ipset list allowed-domains`.
-- Add a host: append to `.devcontainer/config/extra-allowlist.txt` (mounted at
-  `/etc/claude-firewall/extra-allowlist.txt`), then
-  `docker exec claude-code sudo /usr/local/bin/init-firewall.sh`.
+- Add an entry: put a **hostname** *or* a bare **IPv4 address / CIDR** (e.g. a LAN
+  host like `192.168.1.50`) on its own line in
+  `.devcontainer/config/extra-allowlist.txt` (mounted at
+  `/etc/claude-firewall/extra-allowlist.txt`). Hostnames are resolved at apply
+  time; IPs/CIDRs are added straight to the firewall set.
+- Apply it: `make firewall`. **On Docker Desktop macOS**, if you edited the file in
+  an editor rather than `>>`-appending, the single-file bind mount is inode-pinned
+  to the old file — re-running the firewall re-reads stale content and your edit
+  appears to do nothing. Run `docker restart claude-code` instead (re-binds the
+  mount and re-applies the rules), or `make rebuild` to bake the change in.
 - Open egress entirely: `FIREWALL_MODE=permissive docker compose -f .devcontainer/compose.yaml up -d`.
 
 ## Troubleshooting the firewall
