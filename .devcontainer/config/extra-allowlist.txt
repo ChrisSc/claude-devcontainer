@@ -17,4 +17,6 @@
 # huggingface.co            # ML model/dataset downloads
 # developer.mozilla.org     # docs for Claude WebFetch
 # stackoverflow.com
-github.com
+#
+# Note: github.com, api.github.com, and the release-asset hosts are ALWAYS
+# allowed by init-firewall.sh — you do not need to list them here.

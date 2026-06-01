@@ -4,9 +4,9 @@ This is your environment. It's seeded once; edit it freely. A live, always-fresh
 companion (`~/.claude/ENVIRONMENT.md`) is regenerated every boot with exact
 versions and the current firewall mode — consult it when you need specifics.
 
-> This file documents the **environment**. The organization-level CLAUDE.md
-> governs **how to write code** (Google Python/TS style + observability-first).
-> Don't duplicate style rules here.
+> This file documents the **environment** (what's installed, how the sandbox
+> behaves). If you keep a global or project `CLAUDE.md` with code-style rules,
+> that governs **how to write code** — don't duplicate style rules here.
 
 ## 1. What this machine is
 - A security-sandboxed dev container — your long-lived home. Safe to use as a

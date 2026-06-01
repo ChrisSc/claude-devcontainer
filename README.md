@@ -4,6 +4,10 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![pgvector](https://img.shields.io/badge/pgvector-enabled-2F6792?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.md)
+
+> **Unofficial / not affiliated with Anthropic.** Independent project; derived
+> from Anthropic's devcontainer (see [License & attribution](#license--attribution)).
 
 A modernized, security-sandboxed home for [Claude Code](https://claude.com/claude-code),
 derived from the official [`anthropics/claude-code/.devcontainer`](https://github.com/anthropics/claude-code/tree/main/.devcontainer).
@@ -257,3 +261,21 @@ to an IP not captured at boot. Re-run `make firewall` to refresh the resolved IP
 ```
 
 See `.devcontainer/seed/CLAUDE.md` for the in-container orientation doc.
+
+## License & attribution
+
+This repository's own original work is licensed under the [MIT License](LICENSE.md).
+
+It is **derived from** Anthropic's
+[`anthropics/claude-code/.devcontainer`](https://github.com/anthropics/claude-code/tree/main/.devcontainer) —
+most directly `init-firewall.sh` (the default-deny egress pattern). That upstream
+project is **not** open source; it is governed by
+[Anthropic's Commercial Terms of Service](https://www.anthropic.com/legal/commercial-terms).
+The MIT grant here covers only this repo's original code; the derived portions
+remain subject to Anthropic's terms. If you redistribute, keep this attribution.
+
+**Not affiliated with Anthropic.** This is an independent, unofficial project — not
+endorsed by or sponsored by Anthropic. "Claude" and "Claude Code" are trademarks of
+Anthropic, PBC, used here only to describe what this container runs.
+
+See [SECURITY.md](SECURITY.md) for the sandbox's security model and how to report issues.
