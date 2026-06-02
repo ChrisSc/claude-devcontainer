@@ -8,6 +8,10 @@
 # These supplement the always-on allowlist baked into init-firewall.sh. Use this
 # instead of editing the script. For fully open egress, set FIREWALL_MODE=permissive.
 #
+# This is the tracked TEMPLATE. On first `make up` / "Reopen in Container",
+# gen-allowlist.sh copies it to extra-allowlist.txt (gitignored) if that file is
+# missing. Add your own hosts/IPs to extra-allowlist.txt, then run `make firewall`.
+#
 # --- Examples (uncomment to enable) ---
 # crates.io                 # runtime `cargo install`
 # index.crates.io
@@ -28,17 +32,11 @@
 # AWS analog of GitHub's /meta) — covering `aws sso login` + the CLI (oidc /
 # portal.sso / sts / s3 / awsapps.com). Optionally narrow by region to shrink the
 # ipset, e.g. `@aws-ip-ranges us-east-1 eu-west-1` (GLOBAL/CloudFront always kept).
+# Kept active by default: the image ships the AWS CLI, so AWS egress works
+# out of the box. Comment it out if you don't use AWS.
 @aws-ip-ranges
-agent.robinhood.com
-query1.finance.yahoo.com
-query2.finance.yahoo.com
-fc.yahoo.com
-consent.yahoo.com
-guce.yahoo.com
-finviz.com
-zacks.com
-tradingview.com
 
 # --- Literal IPs / CIDRs (LAN hosts, static endpoints) ---
 # A bare IPv4 address or CIDR is added straight to the firewall ipset.
-192.168.68.70
+# 192.168.1.50              # a LAN host (uncomment & edit)
+# 10.0.0.0/24               # a CIDR range

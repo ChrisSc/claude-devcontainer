@@ -4,13 +4,18 @@
   "service": "claude-code",
   "workspaceFolder": "/workspace",
   "remoteUser": "claude",
-  // Runs on the HOST before the container is created. Generates the gitignored
-  // .devcontainer/.env (DB secrets) so compose's `env_file` injects PG*/DATABASE_URL
-  // on first create. Without this, "Reopen in Container" (or a raw `docker compose
-  // up`) can create claude-code BEFORE `.env` exists -> no DB secrets injected, and
-  // env_file is read only at create time so a later restart won't fix it. Idempotent:
-  // gen-env.sh leaves an existing .env untouched. (`make up`/`db-up` cover the CLI path.)
-  "initializeCommand": "bash .devcontainer/gen-env.sh",
+  // Runs on the HOST before the container is created. Two preflights:
+  // (1) gen-env.sh generates the gitignored .devcontainer/.env (DB secrets) so
+  // compose's `env_file` injects PG*/DATABASE_URL on first create. Without it,
+  // "Reopen in Container" (or a raw `docker compose up`) can create claude-code
+  // BEFORE `.env` exists -> no DB secrets injected, and env_file is read only at
+  // create time so a later restart won't fix it.
+  // (2) gen-allowlist.sh seeds the gitignored config/extra-allowlist.txt from its
+  // template so the firewall bind-mount source exists; a missing bind-mount path
+  // makes Docker create an empty *directory* there and init-firewall.sh breaks.
+  // Both are idempotent (leave an existing file untouched). (`make up`/`rebuild`
+  // cover the CLI path.)
+  "initializeCommand": "bash .devcontainer/gen-env.sh && bash .devcontainer/gen-allowlist.sh",
   // Keep the compose `command` (sleep infinity) so our ENTRYPOINT orchestration
   // still runs; VS Code defaults this to true and would otherwise mask it.
   "overrideCommand": false,

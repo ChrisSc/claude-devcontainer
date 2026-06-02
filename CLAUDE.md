@@ -86,6 +86,14 @@ auto-update can reach `downloads.claude.ai`. The VS Code path re-runs the firewa
   re-runs the entrypoint firewall). Symptom: host edits to the allowlist appear to
   have no effect even after re-running the firewall. (`make rebuild` also works —
   it bakes the file via the Dockerfile `COPY`.)
+- **`extra-allowlist.txt` is gitignored/personal; the tracked file is
+  `extra-allowlist.txt.example`.** A host preflight (`gen-allowlist.sh`, run by
+  `make up`/`rebuild` and `devcontainer.json`'s `initializeCommand`, mirroring
+  `gen-env.sh`/`.env`) seeds the real file from the template if missing. This is
+  load-bearing, not cosmetic: the Dockerfile still `COPY`s `extra-allowlist.txt`
+  and compose bind-mounts it, and a *missing* bind-mount source makes Docker create
+  an empty directory there (→ `init-firewall.sh` reads a dir and breaks). Don't
+  re-track `extra-allowlist.txt` or point the `COPY`/mount at the `.example`.
 - **`FIREWALL_MODE` must be passed explicitly on the `sudo` line.** sudoers has
   `env_reset` and no `env_keep` for it, so a bare `sudo init-firewall.sh` would
   never see `FIREWALL_MODE` from compose and always run the script's `:-strict`

@@ -4,15 +4,15 @@ COMPOSEDB := $(COMPOSE) --profile db
 ENV_FILE := .devcontainer/.env
 
 .PHONY: up shell rebuild logs stop down nuke firewall doctor cp-skill \
-        env db-up db-down db-psql db-logs db-create db-dump db-reset
+        env allowlist db-up db-down db-psql db-logs db-create db-dump db-reset
 
-up: env    ## Build (if needed) and start the container
+up: env allowlist   ## Build (if needed) and start the container
 	$(COMPOSE) up -d --build
 
 shell:     ## Interactive login shell as `claude`
 	docker exec -it claude-code zsh -l
 
-rebuild: env  ## Rebuild the image from scratch and restart
+rebuild: env allowlist  ## Rebuild the image from scratch and restart
 	$(COMPOSE) build --no-cache
 	$(COMPOSE) up -d
 
@@ -40,6 +40,9 @@ cp-skill:  ## Copy a skill folder into ~/.claude/skills owned by claude: make cp
 	tar -C "$(dir $(SRC:/=))" -cf - "$(notdir $(SRC:/=))" | \
 	  docker exec -i -u claude claude-code tar -C /home/claude/.claude/skills -xf -
 	@echo "copied $(notdir $(SRC:/=)) -> ~/.claude/skills (owned by claude)"
+
+allowlist: ## Seed config/extra-allowlist.txt from the template (if missing)
+	@bash .devcontainer/gen-allowlist.sh
 
 # --- Database (Postgres + pgvector sidecar) -------------------------------
 
