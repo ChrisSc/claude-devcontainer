@@ -39,6 +39,13 @@ auto-update can reach `downloads.claude.ai`. The VS Code path re-runs the firewa
   volume paths — seed CLAUDE.md at `/usr/local/share/claude-seed/`, dotfiles at
   `/home/claude` (only `~/.claude`, `~/.local/share/pnpm` are volumes), Playwright
   browsers at `/usr/local/share/ms-playwright` (NOT the default `~/.cache`).
+- **`~/.ssh` is a *directory* symlink to `~/.claude/ssh`, not per-file.**
+  `seed-claude.sh` links the whole dir so the key, `config`, and `known_hosts` all
+  persist in the volume. Don't "simplify" it to per-file symlinks (`~/.ssh/config`,
+  `~/.ssh/known_hosts`): OpenSSH's `UpdateHostKeys` (default `yes`) and
+  `ssh-keygen -R` rewrite `known_hosts` via temp-file + atomic rename, which
+  replaces a per-file symlink with a real file in the ephemeral `~/.ssh` and
+  silently reverts to non-persistence.
 - **Build-time vs runtime network:** all installs happen at build time (no
   firewall). The firewall's allowlist only governs RUNTIME fetches — add a host to
   the allowlist only if it's needed *after* the container is up.

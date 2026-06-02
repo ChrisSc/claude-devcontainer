@@ -20,18 +20,25 @@ if [ ! -e "$CONFIG_DIR/CLAUDE.md" ] && [ -f "$SEED_SRC" ]; then
     echo "[seed] installed CLAUDE.md"
 fi
 
-# Git-over-SSH: the key + ssh client config live in the persistent ~/.claude/ssh
-# volume, but ~/.ssh itself is NOT a volume — so the ~/.ssh/config symlink that
-# ssh actually reads is wiped on every rebuild. Re-link it each boot so a
-# one-time key setup (keygen + `gh ssh-key add`) survives rebuilds untouched.
-SSH_CONFIG="$CONFIG_DIR/ssh/config"
-if [ -f "$SSH_CONFIG" ]; then
-    install -d -m 700 "$HOME/.ssh"
-    ln -sf "$SSH_CONFIG" "$HOME/.ssh/config"
-    chmod 600 "$SSH_CONFIG"
-    [ -f "$CONFIG_DIR/ssh/id_ed25519" ] && chmod 600 "$CONFIG_DIR/ssh/id_ed25519"
-    echo "[seed] linked ~/.ssh/config -> $SSH_CONFIG"
-fi
+# Git-over-SSH: the key, client config, AND learned host fingerprints all live in
+# the persistent ~/.claude/ssh volume, but ~/.ssh itself is NOT a volume — so its
+# contents are wiped on every rebuild. Point ~/.ssh at the volume dir each boot so
+# a one-time key setup (keygen + `gh ssh-key add`) *and* accumulated known_hosts /
+# known_hosts.old survive rebuilds untouched.
+#
+# A *directory* symlink (not per-file) is load-bearing: OpenSSH's UpdateHostKeys
+# path (default `yes` since 8.5) and `ssh-keygen -R` rewrite known_hosts via
+# temp-file + atomic rename into the file's dir. A per-file ~/.ssh/known_hosts
+# symlink would be clobbered by that rename — replaced with a real file in the
+# ephemeral ~/.ssh — silently reverting to non-persistence. Linking the whole dir
+# keeps every rewrite inside the volume. Don't revert this to per-file symlinks.
+SSH_DIR="$CONFIG_DIR/ssh"
+install -d -m 700 "$SSH_DIR"
+[ -L "$HOME/.ssh" ] || rm -rf "$HOME/.ssh"   # drop a plain dir from a prior build
+ln -sfn "$SSH_DIR" "$HOME/.ssh"
+[ -f "$SSH_DIR/config" ] && chmod 600 "$SSH_DIR/config"
+[ -f "$SSH_DIR/id_ed25519" ] && chmod 600 "$SSH_DIR/id_ed25519"
+echo "[seed] linked ~/.ssh -> $SSH_DIR"
 
 ver() { command -v "$1" >/dev/null 2>&1 && "$@" 2>/dev/null | head -n1 || echo "n/a"; }
 

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- SSH persistence now covers `known_hosts` / `known_hosts.old`: `seed-claude.sh`
+  symlinks the whole `~/.ssh` dir to the persistent `~/.claude/ssh` volume (instead
+  of just the `config` file), so learned host fingerprints survive rebuilds and no
+  longer need re-accepting. A directory symlink is required — OpenSSH rewrites
+  `known_hosts` via temp-file + atomic rename, which would clobber a per-file
+  symlink.
+
 ## [0.1.1] - 2026-06-01
 
 ### Added

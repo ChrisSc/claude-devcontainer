@@ -108,10 +108,10 @@ No host credentials are mounted. Authenticate once inside; it persists in the
   `$AWS_SHARED_CREDENTIALS_FILE=~/.claude/aws/credentials`, so creds persist in the
   volume across rebuilds. Runtime egress to AWS APIs is allowed via the firewall's
   `@aws-ip-ranges` directive (see `config/extra-allowlist.txt`).
-- SSH for git: keep the key in the persistent `~/.claude/ssh/` volume and wire it
-  via `~/.ssh/config` (a symlink — `~/.ssh` itself is NOT persistent). Make a
-  passphrase-free key (so no ssh-agent is needed), register it with GitHub, and
-  point ssh at it:
+- SSH for git: keep the key in the persistent `~/.claude/ssh/` volume — `~/.ssh`
+  itself is NOT persistent, so `seed-claude.sh` symlinks the whole `~/.ssh` dir to
+  `~/.claude/ssh` on every boot. Make a passphrase-free key (so no ssh-agent is
+  needed), register it with GitHub, and point ssh at it:
   ```sh
   mkdir -p ~/.claude/ssh && chmod 700 ~/.claude/ssh
   ssh-keygen -t ed25519 -C "claude-code container" -f ~/.claude/ssh/id_ed25519 -N ""
@@ -125,11 +125,11 @@ No host credentials are mounted. Authenticate once inside; it persists in the
   chmod 600 ~/.claude/ssh/config
   ssh -T git@github.com   # expect: "Hi <user>! You've successfully authenticated"
   ```
-  This is a one-time setup. The key + config in `~/.claude` survive rebuilds, and
-  `seed-claude.sh` re-creates the ephemeral `~/.ssh/config` symlink on every boot
-  (whenever `~/.claude/ssh/config` exists), so git-over-SSH works immediately after
-  a rebuild with no manual relinking. The `gh auth refresh` device flow prints a
-  code — open the URL on your host to approve (firewall allows github.com).
+  This is a one-time setup. Because `~/.ssh` is a directory symlink into
+  `~/.claude`, the key, `config`, AND learned `known_hosts` fingerprints all
+  survive rebuilds — git-over-SSH works immediately after a rebuild with no manual
+  relinking and no re-accepting host keys. The `gh auth refresh` device flow prints
+  a code — open the URL on your host to approve (firewall allows github.com).
 
 ## 8. Updating Claude Code
 Installed via the native installer; auto-updates at container start (from the

@@ -100,22 +100,23 @@ ssh-keygen -t ed25519 -C "claude-code container" -f ~/.claude/ssh/id_ed25519 -N 
 gh auth refresh -h github.com -s admin:public_key
 gh ssh-key add ~/.claude/ssh/id_ed25519.pub --title "claude-code container"
 
-# point ssh at the key; ~/.ssh is ephemeral so symlink the real config from ~/.claude
+# point ssh at the key (~/.ssh is symlinked to ~/.claude/ssh at boot — see below)
 cat > ~/.claude/ssh/config <<'EOF'
 Host github.com
   IdentityFile ~/.claude/ssh/id_ed25519
   IdentitiesOnly yes
 EOF
 chmod 600 ~/.claude/ssh/config
-mkdir -p ~/.ssh && ln -sf ~/.claude/ssh/config ~/.ssh/config
 
 ssh -T git@github.com   # expect: "Hi <user>! You've successfully authenticated…"
 ```
 
-The key and config live in `~/.claude/ssh/` (persists across rebuilds); only the
-`~/.ssh/config` symlink is ephemeral and is re-created by the `ln` above. The
-`gh auth refresh` step uses GitHub's device flow — it prints a code; open the URL
-on your **host** browser to approve (the firewall allows `github.com`).
+Everything in `~/.claude/ssh/` persists across rebuilds: `seed-claude.sh` points
+`~/.ssh` at it as a directory symlink on every boot, so the key, `config`, and
+learned `known_hosts` fingerprints all survive — no manual relinking, and no
+re-accepting host fingerprints after a `make rebuild`. The `gh auth refresh` step
+uses GitHub's device flow — it prints a code; open the URL on your **host** browser
+to approve (the firewall allows `github.com`).
 
 ## What persists
 
