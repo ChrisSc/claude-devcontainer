@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The firewall allowlist is now templated: the repo ships an anonymized
+  `config/extra-allowlist.txt.example`, and the real `config/extra-allowlist.txt`
+  is **gitignored** (it may hold LAN IPs / private hosts). A host preflight
+  (`gen-allowlist.sh`, run by `make up`/`rebuild` and `devcontainer.json`'s
+  `initializeCommand`) seeds the real file from the template if missing — required
+  because a missing bind-mount source would make Docker create an empty directory
+  there and break `init-firewall.sh`. The template keeps `@aws-ip-ranges` active by
+  default (the image ships the AWS CLI).
+
+### Security
+
+- Removed personal data from the tracked allowlist (a LAN IP and personal
+  financial-data hosts) ahead of making the repo public.
+
 ## [0.1.2] - 2026-06-02
 
 ### Changed

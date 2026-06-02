@@ -207,7 +207,13 @@ make db-down                # stop it (data volume preserved)
 
 ## Network posture
 
-The firewall is **default-deny outbound**. If something can't reach the network:
+The firewall is **default-deny outbound**. The host-editable allowlist lives at
+`.devcontainer/config/extra-allowlist.txt`. That file is **gitignored** (it may
+hold LAN IPs / private hosts); the tracked template is
+`extra-allowlist.txt.example`. On your first `make up`/`make rebuild` (or VS Code
+"Reopen in Container"), the preflight seeds the real file from the template if it's
+missing — the default allows AWS egress (`@aws-ip-ranges`). Edit it to add your
+own hosts, then `make firewall`. If something can't reach the network:
 
 - Check the allowlist: `sudo ipset list allowed-domains`.
 - Add an entry: put a **hostname** *or* a bare **IPv4 address / CIDR** (e.g. a LAN
@@ -262,8 +268,8 @@ to an IP not captured at boot. Re-run `make firewall` to refresh the resolved IP
 .devcontainer/
   devcontainer.json    compose.yaml    Dockerfile
   init-firewall.sh     entrypoint.sh   seed-claude.sh    install-tools.sh
-  gen-env.sh           db-init/10-pgvector.sql   # DB: secret gen + pgvector init
-  config/extra-allowlist.txt            .env.example   # .env is generated, gitignored
+  gen-env.sh           gen-allowlist.sh   db-init/10-pgvector.sql
+  config/extra-allowlist.txt.example    .env.example   # real files generated, gitignored
   home/.zshrc          home/.config/{starship.toml,zsh/aliases.zsh}
   seed/CLAUDE.md       # -> ~/.claude/CLAUDE.md on first start
 ```
