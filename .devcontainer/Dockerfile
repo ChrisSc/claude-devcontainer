@@ -14,7 +14,7 @@
 # firewall (init-firewall.sh) is applied — so build-time downloads are unrestricted.
 FROM node:24-bookworm
 
-ARG TZ=America/Los_Angeles
+ARG TZ=America/New_York
 ENV TZ="${TZ}" \
     DEBIAN_FRONTEND=noninteractive \
     DEVCONTAINER=true \
@@ -38,12 +38,18 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends \
         # core
         git gh less procps sudo zsh man-db unzip wget gnupg2 \
-        build-essential pkg-config python3 \
+        build-essential pkg-config python3 tzdata \
         # firewall
         iptables ipset iproute2 dnsutils aggregate \
         # everyday CLI (apt-provided)
         jq ripgrep fd-find bat fzf direnv htop ncdu tree nano vim \
     ; \
+    # Pin the SYSTEM timezone to $TZ. The base image only had `ENV TZ` set, which
+    # glibc CLI tools honor — but /etc/localtime stayed at Etc/UTC, so anything
+    # reading the system clock files (not the env var) silently got UTC. Set both
+    # so the env var and the system files agree (no split-brain timezone).
+    ln -snf "/usr/share/zoneinfo/${TZ}" /etc/localtime; \
+    echo "${TZ}" > /etc/timezone; \
     # Debian ships these under alternate binary names — add the canonical ones.
     ln -sf "$(command -v fdfind)" /usr/local/bin/fd; \
     ln -sf "$(command -v batcat)" /usr/local/bin/bat; \

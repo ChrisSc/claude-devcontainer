@@ -14,7 +14,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        TZ: ${TZ:-America/Los_Angeles}
+        TZ: ${TZ:-America/New_York}
     # Required for the iptables/ipset egress firewall (init-firewall.sh).
     cap_add:
       - NET_ADMIN
@@ -30,7 +30,7 @@ services:
     environment:
       # Firewall posture: strict (default) | permissive | dev
       FIREWALL_MODE: ${FIREWALL_MODE:-strict}
-      TZ: ${TZ:-America/Los_Angeles}
+      TZ: ${TZ:-America/New_York}
     volumes:
       - workspace:/workspace                                   # isolated code (no host path)
       - config:/home/claude/.claude                            # Claude state/auth/gh/git/CLAUDE.md

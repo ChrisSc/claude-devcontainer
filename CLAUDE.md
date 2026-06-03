@@ -112,6 +112,16 @@ auto-update can reach `downloads.claude.ai`. The VS Code path re-runs the firewa
   `/usr/bin/python3` (3.11) — the prompt/tools silently use the wrong interpreter.
   The `--default --preview-features python-install-default` form adds generic
   `python`/`python3` shims to `~/.local/bin` (first on PATH); don't drop it.
+- **Timezone is baked into `/etc/localtime` at build time; `TZ` lives in three
+  places that must agree.** `Dockerfile` `ARG TZ` (default `America/New_York`)
+  sets BOTH the env var (glibc CLI tools honor it) AND the `/etc/localtime`
+  symlink + `/etc/timezone`; compose threads `${TZ:-…}` into the build arg *and*
+  the runtime `environment:`. Change only the runtime env and `restart` and you
+  get a split-brain zone — `date` shows the new zone but `/etc/localtime`-readers
+  (e.g. Python `datetime`) keep the baked one. A real zone switch needs a
+  **rebuild** (`TZ=… make rebuild`), not a restart. Don't add in-container NTP:
+  the clock is the host kernel's (Docker keeps its VM synced), so drift isn't the
+  container's to fix.
 - **DB password applies only on first init of `claude-pgdata`.** The generated
   `.devcontainer/.env` (gitignored; `make env`) is baked into the data volume
   when Postgres first initializes — changing `.env` later does NOT re-key the

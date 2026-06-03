@@ -74,6 +74,30 @@ same `compose.yaml`, so you get the identical environment with the Claude Code,
 ESLint, Prettier, GitLens, Python, Pylance, Ruff, and Playwright extensions
 preinstalled.
 
+## Timezone
+
+The container defaults to **`America/New_York`**. The clock itself is the host's
+(a container shares the host kernel's time — Docker Desktop keeps its VM synced to
+your machine), so only the *zone* is configured here, via the `TZ` variable. It's
+set in two places that stay in lockstep: the env var (which glibc CLI tools honor)
+and `/etc/localtime` (which everything else reads).
+
+Override it for your region with the `TZ` env var — `compose.yaml` threads it into
+both the build arg and the runtime env:
+
+```bash
+TZ=Europe/London docker compose -f .devcontainer/compose.yaml up -d --build
+# or with the Makefile
+TZ=Europe/London make up
+```
+
+Use any [IANA zone name](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones)
+(e.g. `Asia/Tokyo`, `UTC`). Because the zone is baked into `/etc/localtime` at
+build time, a full switch needs a **rebuild** (`--build` / `make rebuild`), not
+just a restart. Verify inside the container with `date` (look for the offset, e.g.
+`EDT`/`-04:00`). To change the default permanently, edit the `TZ` fallbacks in
+`compose.yaml` and the `ARG TZ` in the `Dockerfile`.
+
 ## First run
 
 ```bash
