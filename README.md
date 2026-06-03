@@ -12,9 +12,9 @@
 A modernized, security-sandboxed home for [Claude Code](https://claude.com/claude-code),
 derived from the official [`anthropics/claude-code/.devcontainer`](https://github.com/anthropics/claude-code/tree/main/.devcontainer).
 
-- **Base:** Node 24 (LTS) on Debian bookworm. Runs on **macOS/Apple Silicon
-  (arm64)** and **Windows WSL2/Intel (amd64)** — builds native to the host, no
-  emulation (see [Platform support](#platform-support)).
+- **Base:** Node 24 (LTS) on Debian bookworm. Runs on any **arm64 or amd64**
+  Docker host — native **Linux**, **macOS**, or **Windows WSL2** — building native
+  to the host arch, no emulation (see [Platform support](#platform-support)).
 - **User:** `claude` (passwordless sudo), zsh + starship.
 - **Languages:** Node 24 / TypeScript / pnpm / tsx, Python 3.14 via `uv` + `ruff`
   + `pyright`, Playwright + Chromium (baked in).
@@ -29,11 +29,13 @@ Compose project (container group): **`claude`** · container: **`claude-code`**.
 
 ## Platform support
 
-Works on two host setups; the same Dockerfile builds **native to the host arch**
-(no emulation, no `--platform` flag):
+Support is gated on **arch, not OS** — everything runs inside a Linux container,
+and the same Dockerfile builds **native to the host arch** (no emulation, no
+`--platform` flag) as long as that arch is arm64 or amd64:
 
 | Host | Arch | Notes |
 |---|---|---|
+| Linux | arm64 / amd64 | Docker Engine. Cleanest host — iptables/ipset are in-kernel, so the firewall runs fully. |
 | macOS, Apple Silicon | arm64 | Docker Desktop. Works out of the box. |
 | Windows, Intel/AMD | amd64 | Docker Desktop with the **WSL2 backend**, run from inside WSL2. |
 

@@ -6,10 +6,14 @@ self-contained home for Claude Code. Everything lives in `.devcontainer/`.
 ## What this repo is (and isn't)
 - It is **container definition + config**, not an application. There is no app to
   run here on the host; the deliverable is the image and its startup behavior.
-- Target runtime: Docker Desktop on **macOS/arm64** (Apple Silicon) OR Docker on
-  **Windows WSL2/amd64** (Intel). Builds native to the host arch — no `platform:`
-  pin (one would force slow emulation). Only arm64/amd64 are wired up;
-  `install-tools.sh` errors on anything else.
+- Target runtime: any Docker host on **arm64 or amd64** — native **Linux**, Docker
+  Desktop on **macOS**, or Docker on **Windows WSL2**. Support is gated on *arch*,
+  not OS: everything runs inside a Linux container, and `install-tools.sh` errors
+  on anything that isn't arm64/amd64. Builds native to the host arch — no
+  `platform:` pin (one would force slow emulation). Native Linux is the cleanest
+  host (iptables/ipset are in-kernel, so the firewall runs fully); macOS/Windows
+  add a Docker Desktop VM layer, which is where the platform caveats below come
+  from (the inode-pinned bind-mount, the WSL2-vs-Hyper-V firewall backend).
 - **Cross-platform invariants:** scripts must stay LF (enforced by
   `.gitattributes` + a defensive `sed 's/\r$//'` in the Dockerfile) or CRLF from a
   Windows checkout breaks the entrypoint with `bad interpreter: ...^M`. The
