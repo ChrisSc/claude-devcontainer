@@ -105,7 +105,13 @@ auto-update can reach `downloads.claude.ai`. The VS Code path re-runs the firewa
   /usr/local/bin/init-firewall.sh` (an explicit `VAR=val` assignment survives
   `env_reset`) — `entrypoint.sh` and `devcontainer.json`'s `postStartCommand`.
   Don't drop the assignment back to a bare `sudo …`; that silently re-breaks the
-  `permissive`/`dev` switch.
+  `permissive`/`dev` switch. As a backstop, the script records the effective
+  mode in `/etc/claude-firewall/mode` and a run with no `FIREWALL_MODE` in env
+  defaults to that file (then `strict`) — so a *bare* re-run (in-container
+  agents re-run `init-firewall.sh` to refresh rotated CDN IPs; `make firewall`)
+  no longer clamps a permissive container back to strict. Don't remove the
+  mode-file write/read; that regression is invisible until an agent's firewall
+  refresh kills permissive egress mid-session.
 - **`docker cp`-ing a script into the running container drops its exec bit**
   (`sudo: …: command not found`). Source scripts are kept `+x` in git, but
   `docker cp` applies the host file mode and the Dockerfile's `chmod +x` only

@@ -15,6 +15,16 @@
 set -euo pipefail
 IFS=$'\n\t'
 
+# The mode is STICKY across re-runs. The entrypoint / postStartCommand pass
+# FIREWALL_MODE explicitly (sudoers env_reset would strip the ambient var) and
+# it is recorded in MODE_FILE; a BARE `sudo init-firewall.sh` re-run — e.g. an
+# in-container agent refreshing rotated CDN IPs, or `make firewall` — re-reads
+# the recorded mode instead of silently clamping a permissive container back to
+# strict. Precedence: explicit env > recorded mode > strict.
+MODE_FILE="/etc/claude-firewall/mode"
+if [ -z "${FIREWALL_MODE:-}" ] && [ -r "$MODE_FILE" ]; then
+    FIREWALL_MODE="$(head -n1 "$MODE_FILE" | tr -d '[:space:]')"
+fi
 FIREWALL_MODE="${FIREWALL_MODE:-strict}"
 EXTRA_ALLOWLIST="/etc/claude-firewall/extra-allowlist.txt"
 
@@ -85,6 +95,10 @@ if ! firewall_supported; then
     warn "skipping firewall setup; outbound traffic is NOT restricted"
     exit 0
 fi
+
+# Record the effective mode so later bare re-runs inherit it (see MODE_FILE above).
+mkdir -p "$(dirname "$MODE_FILE")"
+printf '%s\n' "$FIREWALL_MODE" > "$MODE_FILE"
 
 # Resolve a domain and add every A record to the ipset. NON-FATAL by design.
 add_domain() {
