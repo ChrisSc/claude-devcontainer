@@ -15,6 +15,7 @@
 !entrypoint.sh
 !seed-claude.sh
 !init-cron.sh
+!log-event.sh
 !crontab-reload
 !crontab-edit
 !home/

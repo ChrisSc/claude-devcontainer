@@ -15,6 +15,15 @@
 set -euo pipefail
 IFS=$'\n\t'
 
+# Structured boot-event journal (fire-and-forget JSONL; the log()/warn() console
+# lines stay as the dev mirror). Sourced here so the firewall — the single most
+# security-relevant state mutation — records its apply outcome to the shared
+# trail. BOOT_ID is threaded from the entrypoint's `sudo … BOOT_ID=…` so these
+# events correlate with the rest of the boot; a bare re-run gets `unknown`.
+# shellcheck source=/dev/null
+. /usr/local/bin/log-event.sh 2>/dev/null || true
+command -v log_event >/dev/null 2>&1 || log_event() { :; }
+
 # The mode is STICKY across re-runs. The entrypoint / postStartCommand pass
 # FIREWALL_MODE explicitly (sudoers env_reset would strip the ambient var) and
 # it is recorded in MODE_FILE; a BARE `sudo init-firewall.sh` re-run — e.g. an
@@ -26,6 +35,7 @@ if [ -z "${FIREWALL_MODE:-}" ] && [ -r "$MODE_FILE" ]; then
     FIREWALL_MODE="$(head -n1 "$MODE_FILE" | tr -d '[:space:]')"
 fi
 FIREWALL_MODE="${FIREWALL_MODE:-strict}"
+log_event firewall firewall.apply.start mode "${FIREWALL_MODE}"
 EXTRA_ALLOWLIST="/etc/claude-firewall/extra-allowlist.txt"
 # Resilience for a raw `docker compose up --build` on a fresh clone: if the real
 # allowlist is absent (gen-allowlist.sh hasn't run, or the bind-mount source was
@@ -119,6 +129,7 @@ if ! firewall_supported; then
     echo "  ############################################################"
     echo
     warn "skipping firewall setup; outbound traffic is NOT restricted"
+    log_event firewall firewall.degraded reason "iptables/ipset unsupported"
     exit 0
 fi
 
@@ -456,6 +467,7 @@ case "$FIREWALL_MODE" in
         # guard so it doesn't re-clamp to DROP on the exit below.
         trap - EXIT
         log "firewall configuration complete (permissive)"
+        log_event firewall firewall.complete.permissive
         exit 0
         ;;
     strict)
@@ -502,3 +514,4 @@ else
 fi
 
 log "firewall configuration complete (strict)"
+log_event firewall firewall.complete.strict

@@ -53,9 +53,12 @@
   // its pgrep guard makes the re-run a no-op if cron is already up).
   // FIREWALL_MODE is passed explicitly — sudoers `env_reset` drops the ambient
   // env, so without this the firewall always runs in its :-strict default.
+  // BOOT_ID is generated here and threaded into BOTH the sudo firewall call
+  // (env_reset would otherwise strip it) AND init-cron.sh's env, so this VS Code
+  // re-run is a distinct, correlatable entry in the boot-events JSONL trail.
   // Firewall failure is FATAL (its nonzero exit propagates as the postStartCommand
   // exit, so VS Code surfaces a failed egress firewall) — only the non-security
   // steps (claude update, cron) are tolerated with `|| true`.
-  "postStartCommand": "sudo FIREWALL_MODE=${FIREWALL_MODE:-strict} /usr/local/bin/init-firewall.sh && { claude update || true; /usr/local/bin/init-cron.sh || true; }",
+  "postStartCommand": "export BOOT_ID=poststart-$(date -u +%Y%m%dT%H%M%SZ)-$$; sudo FIREWALL_MODE=${FIREWALL_MODE:-strict} BOOT_ID=${BOOT_ID} /usr/local/bin/init-firewall.sh && { claude update || true; /usr/local/bin/init-cron.sh || true; }",
   "waitFor": "postStartCommand"
 }

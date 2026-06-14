@@ -4,7 +4,7 @@ COMPOSEDB := $(COMPOSE) --profile db
 ENV_FILE := .devcontainer/.env
 
 .PHONY: up shell rebuild logs stop down nuke firewall doctor cp-skill \
-        cron-reload cron-log lint smoke \
+        cron-reload cron-log lint smoke boot-check \
         env allowlist db-up db-down db-psql db-logs db-create db-dump db-reset
 
 # Shell scripts that ARE the deliverable (the same set CI shellchecks).
@@ -76,6 +76,46 @@ smoke: env allowlist ## Build + boot the image (permissive firewall) and assert 
 	docker exec claude-code bash -lc 'command -v rg fd bat jq yq aws lazygit'
 	docker exec claude-code test -f /home/claude/.claude/ENVIRONMENT.md
 	@echo "smoke OK"
+
+boot-check: ## Event-completeness gate: assert the boot pipeline emitted its lifecycle events in order
+	@docker inspect -f '{{.State.Running}}' claude-code 2>/dev/null | grep -q true || \
+	  { echo "claude-code is not running (make up / make smoke)"; exit 1; }
+	@# Wait for the journal to exist + carry a terminal entrypoint.ready (the boot
+	@# may still be running just after `up`). Then assert the required events are
+	@# present and correctly ordered for the LATEST boot_id. jq is baked in.
+	@for i in $$(seq 1 60); do \
+	  docker exec claude-code bash -lc 'jq -e "select(.event==\"entrypoint.ready\")" ~/.claude/logs/boot-events.jsonl >/dev/null 2>&1' && break; \
+	  sleep 1; \
+	done
+	@docker exec claude-code bash -lc '\
+	  set -euo pipefail; \
+	  J=~/.claude/logs/boot-events.jsonl; \
+	  [ -f "$$J" ] || { echo "boot-check FAIL: no boot-events.jsonl"; exit 1; }; \
+	  bid=$$(jq -rs "[.[]|select(.event==\"entrypoint.ready\")]|last|.boot_id // empty" "$$J"); \
+	  [ -n "$$bid" ] || bid=$$(jq -rs "last|.boot_id // empty" "$$J"); \
+	  [ -n "$$bid" ] || { echo "boot-check FAIL: empty journal"; exit 1; }; \
+	  echo "boot-check: auditing boot_id=$$bid"; \
+	  events=$$(jq -r --arg b "$$bid" "select(.boot_id==\$$b)|.event" "$$J"); \
+	  required="firewall.apply.start firewall.complete seed.ssh.linked seed.environment.regenerated cron.installed cron.daemon.started entrypoint.ready"; \
+	  idx=0; \
+	  ok=1; \
+	  for need in $$required; do \
+	    found=0; \
+	    n=0; \
+	    while IFS= read -r ev; do \
+	      n=$$((n+1)); \
+	      [ "$$n" -le "$$idx" ] && continue; \
+	      case "$$need" in \
+	        firewall.complete) \
+	          case "$$ev" in firewall.complete.strict|firewall.complete.permissive|firewall.degraded) found=1; idx=$$n;; esac;; \
+	        *) [ "$$ev" = "$$need" ] && { found=1; idx=$$n; };; \
+	      esac; \
+	      [ "$$found" = 1 ] && break; \
+	    done <<< "$$events"; \
+	    if [ "$$found" = 1 ]; then echo "  ok   $$need"; \
+	    else echo "  MISS $$need (missing or out of order)"; ok=0; break; fi; \
+	  done; \
+	  [ "$$ok" = 1 ] && echo "boot-check OK" || { echo "boot-check FAIL"; exit 1; }'
 
 # --- Database (Postgres + pgvector sidecar) -------------------------------
 
