@@ -13,7 +13,10 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE="$DIR/.env"
 
 if [ -f "$ENV_FILE" ]; then
-    echo "[gen-env] $ENV_FILE exists — leaving it untouched"
+    # Re-secure perms even on the keep-it path: an older run (or a manual edit)
+    # may have left the secret world-readable (644). chmod is idempotent.
+    chmod 600 "$ENV_FILE"
+    echo "[gen-env] $ENV_FILE exists — leaving contents untouched (perms 600)"
     exit 0
 fi
 

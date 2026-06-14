@@ -20,14 +20,14 @@ rebuild: env allowlist  ## Rebuild the image from scratch and restart
 logs:      ## Follow container logs (firewall + startup output)
 	$(COMPOSE) logs -f
 
-stop:      ## Stop the container (volumes + data preserved)
-	$(COMPOSE) stop
+stop:      ## Stop the container + db sidecar (volumes + data preserved)
+	$(COMPOSEDB) stop
 
-down:      ## Remove the container (named volumes preserved)
-	$(COMPOSE) down
+down:      ## Remove the container + db sidecar (named volumes preserved)
+	$(COMPOSEDB) down
 
-nuke:      ## Remove the container AND all named volumes (destroys data)
-	$(COMPOSE) down -v
+nuke:      ## Remove the container + db sidecar AND all named volumes (destroys data)
+	$(COMPOSEDB) down -v
 
 firewall:  ## Re-apply the egress firewall (e.g. after editing extra-allowlist.txt)
 	docker exec claude-code sudo /usr/local/bin/init-firewall.sh
@@ -77,10 +77,16 @@ db-create: ## Create a project database (pgvector inherited from template1): mak
 	@echo "created database '$(DB)' (pgvector enabled)"
 
 db-dump:   ## Dump ALL databases to ./db-backups on the host (survives `make nuke`)
+	@docker inspect -f '{{.State.Running}}' claude-code 2>/dev/null | grep -q true || \
+	  { echo "claude-code is not running (make up)"; exit 1; }
+	@docker inspect -f '{{.State.Running}}' claude-db 2>/dev/null | grep -q true || \
+	  { echo "claude-db is not running (make db-up)"; exit 1; }
 	@mkdir -p db-backups
 	@ts=$$(date +%Y%m%d-%H%M%S); \
 	  out="db-backups/all-$$ts.sql"; \
-	  docker exec claude-code pg_dumpall --clean --if-exists > "$$out" && \
+	  tmp="$$out.tmp"; \
+	  docker exec claude-code pg_dumpall --clean --if-exists > "$$tmp" && \
+	    mv "$$tmp" "$$out" || { rm -f "$$tmp"; echo 'dump failed (is the db sidecar up? make db-up)'; exit 1; }; \
 	  echo "dumped all databases -> $$out ($$(wc -c < "$$out") bytes)"
 
 db-reset:  ## DESTROY the db data volume and re-init (e.g. after rotating the password)
