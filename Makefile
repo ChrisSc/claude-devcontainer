@@ -4,8 +4,12 @@ COMPOSEDB := $(COMPOSE) --profile db
 ENV_FILE := .devcontainer/.env
 
 .PHONY: up shell rebuild logs stop down nuke firewall doctor cp-skill \
-        cron-reload cron-log \
+        cron-reload cron-log lint smoke \
         env allowlist db-up db-down db-psql db-logs db-create db-dump db-reset
+
+# Shell scripts that ARE the deliverable (the same set CI shellchecks).
+SHELL_SCRIPTS := $(wildcard .devcontainer/*.sh) \
+                 .devcontainer/crontab-edit .devcontainer/crontab-reload
 
 up: env allowlist   ## Build (if needed) and start the container
 	$(COMPOSE) up -d --build
@@ -50,6 +54,28 @@ cp-skill:  ## Copy a skill folder into ~/.claude/skills owned by claude: make cp
 
 allowlist: ## Seed config/extra-allowlist.txt from the template (if missing)
 	@bash .devcontainer/gen-allowlist.sh
+
+# --- Static gates (mirror .github/workflows/ci.yaml) ----------------------
+
+lint:      ## Run the static gates locally: shellcheck + hadolint + yamllint + compose config
+	shellcheck $(SHELL_SCRIPTS)
+	hadolint --config .hadolint.yaml .devcontainer/Dockerfile
+	yamllint .devcontainer/compose.yaml .github/workflows/ci.yaml
+	$(COMPOSE) config -q
+
+smoke: env allowlist ## Build + boot the image (permissive firewall) and assert its wiring
+	$(COMPOSE) build
+	FIREWALL_MODE=permissive $(COMPOSE) up -d
+	@for i in $$(seq 1 60); do \
+	  docker exec claude-code test -f /home/claude/.claude/ENVIRONMENT.md && break; \
+	  sleep 1; \
+	done
+	docker exec claude-code claude --version
+	docker exec claude-code bash -lc 'command -v python3 | grep -q "^/home/claude/.local/bin/"'
+	docker exec claude-code bash -lc 'python3 --version | grep -q "3.14"'
+	docker exec claude-code bash -lc 'command -v rg fd bat jq yq aws lazygit'
+	docker exec claude-code test -f /home/claude/.claude/ENVIRONMENT.md
+	@echo "smoke OK"
 
 # --- Database (Postgres + pgvector sidecar) -------------------------------
 

@@ -28,7 +28,11 @@ LG_VER="0.62.2"               # jesseduffield/lazygit
 AWS_CLI_VER="2.35.4"          # aws/aws-cli (versioned download path)
 
 # yq publishes per-asset binaries; pin the SHA-256 of each arch's raw binary.
+# Referenced indirectly via ${!yq_sha_var} below, so shellcheck can't see the
+# use — suppress the false-positive SC2034 on the arch-indexed constants.
+# shellcheck disable=SC2034
 YQ_SHA256_amd64="fa52a4e758c63d38299163fbdd1edfb4c4963247918bf9c1c5d31d84789eded4"
+# shellcheck disable=SC2034
 YQ_SHA256_arm64="578648e463a11c1b6db6010cbf41eafed6bee79466fcffa1bb446672cf7945ea"
 
 # AWS CLI public PGP key fingerprint (AWS-published, stable). The build fetches

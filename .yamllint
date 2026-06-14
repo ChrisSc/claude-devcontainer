@@ -1,0 +1,22 @@
+# yamllint config for the YAML the sandbox ships (compose.yaml, CI workflows).
+#
+# Relaxed from the default profile to match this repo's deliberate style:
+#   - document-start disabled: compose.yaml leads with a `#` comment banner,
+#     no `---` marker (the established style; `docker compose config` validates
+#     the structure separately in CI).
+#   - line-length to warning + 100: the compose volume/comment lines and the
+#     workflow run-blocks intentionally run long for readability.
+extends: default
+
+rules:
+  document-start: disable
+  line-length:
+    max: 100
+    level: warning
+  comments:
+    # default requires 2 spaces before inline comments; compose uses aligned
+    # comment columns, so relax the min-spaces requirement.
+    min-spaces-from-content: 1
+  truthy:
+    # Allow GitHub Actions `on:` key (yamllint flags it as a truthy value).
+    check-keys: false

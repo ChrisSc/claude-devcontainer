@@ -18,7 +18,12 @@ setopt HIST_IGNORE_ALL_DUPS HIST_IGNORE_SPACE HIST_REDUCE_BLANKS HIST_VERIFY
 # --- Completion (daily-cached compdump for fast startup) ---
 fpath+=(/usr/share/zsh-plugins/zsh-completions/src)    # must precede compinit
 autoload -Uz compinit
-if [[ -n ${ZDOTDIR:-$HOME}/.zcompdump(#qN.mh+24) ]]; then
+# Array glob evaluates the (Nmh+24) qualifier even without EXTENDED_GLOB: it
+# matches the compdump only if it is >24h old. Full `compinit` rebuilds a stale
+# OR missing dump; a fresh dump takes the fast `-C` (skip-security-check) path.
+local zdump=${ZDOTDIR:-$HOME}/.zcompdump
+local stale=($zdump(Nmh+24))
+if (( ${#stale} )) || [[ ! -e $zdump ]]; then
     compinit
 else
     compinit -C

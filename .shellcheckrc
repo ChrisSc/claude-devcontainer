@@ -1,0 +1,13 @@
+# shellcheck config for the sandbox shell scripts (the core deliverable).
+#
+# severity=warning gates regressions, not style noise: every script passes clean
+# at this level today. The handful of info-level findings are benign/intentional
+# and disabled explicitly (the rc `severity` floor alone does not change the exit
+# code for them across shellcheck versions, so we name them):
+#   - SC1091  sourcing files shellcheck can't follow (e.g. /etc/os-release) —
+#             those paths only exist inside the container.
+#   - SC2016  single-quoted '$VAR' kept literal on purpose (the jq program in
+#             init-firewall.sh — `$p`/`$r` are jq vars, not shell).
+#   - SC2020  intentional `tr ', ' '\n\n'` byte handling in init-firewall.sh.
+severity=warning
+disable=SC1091,SC2016,SC2020
