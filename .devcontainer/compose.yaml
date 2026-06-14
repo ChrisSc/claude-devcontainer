@@ -15,10 +15,12 @@ services:
       dockerfile: Dockerfile
       args:
         TZ: ${TZ:-America/New_York}
-    # Required for the iptables/ipset egress firewall (init-firewall.sh).
+    # Required for the iptables/ipset egress firewall (init-firewall.sh). Only
+    # NET_ADMIN is load-bearing; the firewall path uses no raw/packet sockets
+    # (no -p icmp, no ping/traceroute), so NET_RAW is intentionally withheld.
+    # Re-add NET_RAW deliberately (with a comment) only if raw ICMP is needed.
     cap_add:
       - NET_ADMIN
-      - NET_RAW
     # Disable IPv6 in the container so there is a single enforced network stack.
     # The egress firewall's strict default-deny is built on the IPv4 allowlist;
     # on an IPv6-enabled Docker host, AAAA destinations would otherwise bypass it
@@ -51,6 +53,26 @@ services:
       - ./config/extra-allowlist.txt:/etc/claude-firewall/extra-allowlist.txt:ro
     # Keep the box alive; the ENTRYPOINT runs firewall -> seed -> update, then execs this.
     command: ["sleep", "infinity"]
+    # Assert the boot invariants so a half-booted container (firewall/seed/cron
+    # failed) reports `unhealthy` instead of silently `up`. The OUTPUT DROP check
+    # is gated on the effective firewall mode recorded by init-firewall.sh: it is
+    # only expected in strict mode (permissive/dev open egress on purpose; a
+    # degraded WSL2 kernel has no iptables at all), so non-strict modes skip it.
+    # The check runs as the `claude` user; reading iptables needs CAP_NET_ADMIN,
+    # so it goes through passwordless `sudo -n` (same grant the entrypoint uses).
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - >-
+          command -v claude >/dev/null &&
+          [ -f "$${HOME}/.claude/ENVIRONMENT.md" ] &&
+          pgrep -x cron >/dev/null &&
+          { [ "$$(cat /etc/claude-firewall/mode 2>/dev/null)" != "strict" ] ||
+          sudo -n iptables -S OUTPUT 2>/dev/null | grep -q 'P OUTPUT DROP'; }
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     # Optional guardrails so a runaway build can't starve the host (tune to taste).
     # mem_limit: 8g
     # cpus: 4

@@ -22,7 +22,7 @@ any dev container you run locally.
   kernels), the firewall self-disables and egress is **unrestricted** — by design,
   so the container still boots. A `FIREWALL DEGRADED` banner is printed at startup;
   check it if you depend on filtering being active.
-- **Passwordless `sudo` and `NET_ADMIN`/`NET_RAW`.** These are granted so the
+- **Passwordless `sudo` and `NET_ADMIN`.** These are granted so the
   entrypoint can apply the firewall. A process inside the container effectively has
   root *in the container*. The isolation boundary is the container/VM — not the
   in-container user.
