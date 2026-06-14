@@ -12,7 +12,14 @@
 # DL3016 — npm globals ARE pinned to exact versions via build ARGs (the rule
 #          flags the `@version` form it can't statically see through the ARG).
 # DL3018 — apk is not used (Debian base), but kept for parity with the org config.
+# SC1091 — hadolint's embedded shellcheck can't follow `. /etc/os-release` in the
+#          PGDG repo line: that file exists only inside the build, not at lint
+#          time. The standalone `.shellcheckrc` already disables SC1091 for the
+#          same reason, but hadolint reads THIS config (not .shellcheckrc), and
+#          hadolint-action runs `--failure-threshold info`, so the info-level
+#          finding fails the build unless it is ignored here too.
 ignored:
   - DL3008
   - DL3016
   - DL3018
+  - SC1091

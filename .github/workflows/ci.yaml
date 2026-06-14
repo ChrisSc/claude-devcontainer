@@ -29,6 +29,11 @@ jobs:
           scandir: .devcontainer
           # Extensionless helpers shellcheck won't auto-detect by suffix.
           additional_files: crontab-edit crontab-reload
+          # home/ holds zsh dotfiles (.zshrc, .config/zsh/*.zsh). shellcheck has
+          # no zsh mode and errors on zsh-only syntax (array globs, top-level
+          # `local`), so it must not lint them — `make lint` only globs *.sh and
+          # never sees these. Keeps the CI and local file sets in agreement.
+          ignore_paths: home
 
   hadolint:
     runs-on: ubuntu-latest
