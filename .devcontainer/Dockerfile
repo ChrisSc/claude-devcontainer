@@ -217,7 +217,7 @@ COPY --chown=claude:claude home/.zshrc /home/claude/.zshrc
 COPY --chown=claude:claude home/.config/ /home/claude/.config/
 COPY seed/CLAUDE.md /usr/local/share/claude-seed/CLAUDE.md
 COPY seed/crontab /usr/local/share/claude-seed/crontab
-COPY init-firewall.sh entrypoint.sh seed-claude.sh init-cron.sh \
+COPY init-firewall.sh entrypoint.sh seed-claude.sh init-cron.sh log-event.sh \
      crontab-reload crontab-edit /usr/local/bin/
 COPY config/extra-allowlist.txt /etc/claude-firewall/extra-allowlist.txt
 # The tracked template is baked alongside the (gitignored) real allowlist so a
@@ -231,13 +231,14 @@ COPY config/extra-allowlist.txt.example /etc/claude-firewall/extra-allowlist.txt
 # Windows/WSL hosts: if the repo is checked out with CRLF, scripts otherwise die
 # with `bad interpreter: ...^M` and .zshrc/allowlist parse `\r`-tainted lines.
 # Belt-and-suspenders with .gitattributes (which only helps once it's a git repo).
-# The six /usr/local/bin scripts are normalized + chmod'd in a single loop so
+# The /usr/local/bin scripts are normalized + chmod'd in a single loop so
 # adding a script means editing only the COPY list above, not three lists here.
 RUN set -eux; \
     for f in /usr/local/bin/init-firewall.sh \
              /usr/local/bin/entrypoint.sh \
              /usr/local/bin/seed-claude.sh \
              /usr/local/bin/init-cron.sh \
+             /usr/local/bin/log-event.sh \
              /usr/local/bin/crontab-reload \
              /usr/local/bin/crontab-edit; do \
         sed -i 's/\r$//' "$f"; \

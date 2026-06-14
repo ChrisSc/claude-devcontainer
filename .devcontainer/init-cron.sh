@@ -14,6 +14,13 @@
 # (crontab-reload / crontab-edit). Idempotent: safe to re-run.
 set -euo pipefail
 
+# Structured boot-event journal (fire-and-forget JSONL; the log()/warn() console
+# lines stay as the dev mirror). BOOT_ID is inherited from the entrypoint env
+# (runs as `claude`, no env_reset); a bare reload gets `unknown`. See log-event.sh.
+# shellcheck source=/dev/null
+. /usr/local/bin/log-event.sh 2>/dev/null || true
+command -v log_event >/dev/null 2>&1 || log_event() { :; }
+
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 CRON_DIR="$CONFIG_DIR/cron"
 CRONTAB_FILE="$CRON_DIR/crontab"
@@ -28,6 +35,7 @@ warn() { echo "[cron] WARN: $*" >&2; }
 # Preflight: degrade (don't brick) if the cron package isn't present.
 if ! command -v crontab >/dev/null 2>&1 || [ ! -x "$CROND_BIN" ]; then
     warn "cron not installed — skipping scheduled-agent setup"
+    log_event cron cron.degraded reason "cron not installed"
     exit 0
 fi
 
@@ -80,8 +88,10 @@ if [ -f "$CRONTAB_FILE" ]; then
         # SHELL=/BASH_ENV=/comment lines, so an empty job set reports 0.
         job_lines="$(crontab -l 2>/dev/null | grep -cE '^[[:space:]]*[0-9*@]' || true)"
         log "installed crontab (${job_lines:-0} job line(s))"
+        log_event cron cron.installed job_lines "${job_lines:-0}"
     else
         warn "crontab failed to install $CRONTAB_FILE (parse error?) — left previous spool in place"
+        log_event cron cron.install.failed
     fi
 fi
 
@@ -89,8 +99,11 @@ fi
 #    pgrep so a re-run (postStartCommand / crontab-reload) never double-starts it.
 if pgrep -x cron >/dev/null 2>&1; then
     log "cron daemon already running"
+    log_event cron cron.daemon.started state "already-running"
 elif sudo -n "$CROND_BIN"; then
     log "started cron daemon"
+    log_event cron cron.daemon.started state "started"
 else
     warn "could not start cron daemon"
+    log_event cron cron.daemon.failed
 fi

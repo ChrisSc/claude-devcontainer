@@ -5,6 +5,13 @@
 #   * ENVIRONMENT.md : regenerated every start with the live tool/version inventory.
 set -euo pipefail
 
+# Structured boot-event journal (fire-and-forget JSONL; the echo lines stay as the
+# dev mirror). BOOT_ID is inherited from the entrypoint env (this runs as `claude`,
+# no sudo, so no env_reset); a bare run gets `unknown`. See log-event.sh.
+# shellcheck source=/dev/null
+. /usr/local/bin/log-event.sh 2>/dev/null || true
+command -v log_event >/dev/null 2>&1 || log_event() { :; }
+
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 SEED_SRC="/usr/local/share/claude-seed/CLAUDE.md"
 
@@ -39,6 +46,7 @@ ln -sfn "$SSH_DIR" "$HOME/.ssh"
 [ -f "$SSH_DIR/config" ] && chmod 600 "$SSH_DIR/config"
 [ -f "$SSH_DIR/id_ed25519" ] && chmod 600 "$SSH_DIR/id_ed25519"
 echo "[seed] linked ~/.ssh -> $SSH_DIR"
+log_event seed seed.ssh.linked target "$SSH_DIR"
 
 ver() { command -v "$1" >/dev/null 2>&1 && "$@" 2>/dev/null | head -n1 || echo "n/a"; }
 
@@ -91,3 +99,4 @@ Regenerated at container start by \`seed-claude.sh\`. See CLAUDE.md for guidance
 - (db sidecar) /var/lib/postgresql/data -> claude-pgdata (only with the \`db\` profile)
 EOF
 echo "[seed] regenerated ENVIRONMENT.md"
+log_event seed seed.environment.regenerated
