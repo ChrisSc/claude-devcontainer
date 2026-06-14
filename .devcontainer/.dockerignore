@@ -1,0 +1,27 @@
+# Build context = .devcontainer/ (compose `context: .`). Default-deny: ignore the
+# whole context, then re-include ONLY the paths the Dockerfile actually COPYs.
+# This keeps the generated .env (Postgres password) and other host-only config
+# (compose.yaml, devcontainer.json, gen-*.sh, db-init/, db-backups/) OUT of the
+# build context entirely — they cannot leak into an image layer or `docker history`.
+# It also shrinks the context, so unrelated edits don't bust the build cache.
+#
+# When you add a new COPY source to the Dockerfile, add a matching `!` line here.
+*
+
+# Dockerfile + its COPY sources (keep in sync with the COPY lines in Dockerfile)
+!Dockerfile
+!install-tools.sh
+!init-firewall.sh
+!entrypoint.sh
+!seed-claude.sh
+!init-cron.sh
+!crontab-reload
+!crontab-edit
+!home/
+!seed/CLAUDE.md
+!seed/crontab
+!config/extra-allowlist.txt
+!config/extra-allowlist.txt.example
+
+# Belt-and-suspenders: never ship the DB secret even if a re-include above widens.
+.env

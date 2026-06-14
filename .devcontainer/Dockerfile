@@ -12,7 +12,19 @@
 #
 # Everything in this image is installed at BUILD time, before the runtime egress
 # firewall (init-firewall.sh) is applied — so build-time downloads are unrestricted.
-FROM node:24-bookworm
+#
+# Base image is DIGEST-PINNED for a reproducible, tamper-evident foundation. The
+# digest is the multi-arch manifest-list digest, so it still resolves per-arch
+# (arm64 on Apple Silicon, amd64 on WSL2). Bump deliberately (the tag in the
+# comment is the human-readable label for this digest):
+#   docker buildx imagetools inspect node:24-bookworm   # -> new Digest
+# Renovate/Dependabot can PR digest updates.
+FROM node:24-bookworm@sha256:40ad9f3064e67d6860b4bc3fe1880b2953934fd6320ada990e45fe0efa6badd7
+
+# Fail closed on broken `curl | sh` pipelines: without `-o pipefail`, a failed
+# download upstream of the pipe is masked by the shell's exit status (hadolint
+# DL4006). Applies to every RUN below, incl. the uv/Claude installer pipes.
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG TZ=America/New_York
 ENV TZ="${TZ}" \
@@ -24,13 +36,28 @@ ENV TZ="${TZ}" \
 # ---------------------------------------------------------------------------
 # 1. Base system + developer apt packages (+ GitHub CLI from its official repo)
 # ---------------------------------------------------------------------------
-RUN set -eux; \
+# BuildKit cache mounts keep the apt archive + lists across rebuilds so unchanged
+# package sets aren't re-downloaded. `sharing=locked` serialises concurrent
+# builds; the base image's `docker-clean` (which auto-purges the cache) is removed
+# so the mount actually persists, and the in-layer `apt-get clean`/`rm -rf` is
+# dropped (the cache lives in the mount, NOT the image layer — no size regression).
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    set -eux; \
+    rm -f /etc/apt/apt.conf.d/docker-clean; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl gnupg; \
-    # GitHub CLI repo (gh is not in Debian bookworm main)
+    # GitHub CLI repo (gh is not in Debian bookworm main). TLS authenticates the
+    # host, not the key bytes — so verify the downloaded keyring contains GitHub's
+    # published signing-key fingerprint before trusting it for apt (fails the build
+    # on a swapped key from a compromised endpoint / rogue-CA MITM).
     install -m 0755 -d /etc/apt/keyrings; \
     curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
         -o /etc/apt/keyrings/githubcli-archive-keyring.gpg; \
+    GH_KEY_FPR=2C6106201985B60E6C7AC87323F3D4EA75716059; \
+    gpg --show-keys --with-colons /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+        | awk -F: '/^fpr:/{print $10}' | grep -qx "$GH_KEY_FPR" \
+        || { echo "ERROR: GitHub CLI key fingerprint $GH_KEY_FPR not found" >&2; exit 1; }; \
     chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg; \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
         > /etc/apt/sources.list.d/github-cli.list; \
@@ -52,40 +79,68 @@ RUN set -eux; \
     echo "${TZ}" > /etc/timezone; \
     # Debian ships these under alternate binary names — add the canonical ones.
     ln -sf "$(command -v fdfind)" /usr/local/bin/fd; \
-    ln -sf "$(command -v batcat)" /usr/local/bin/bat; \
-    apt-get clean; rm -rf /var/lib/apt/lists/*
+    ln -sf "$(command -v batcat)" /usr/local/bin/bat
 
 # PostgreSQL 18 client (psql, pg_dump, pg_dumpall, createdb) for the db sidecar.
 # MUST match the server major: an older pg_dump refuses to dump a newer server
 # ("server version: 18; pg_dump version: 15; aborting"). Debian only ships 15, so
 # pull the client from the official PGDG apt repo.
-RUN set -eux; \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    set -eux; \
     install -d /usr/share/postgresql-common/pgdg; \
     curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
         -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc; \
+    # Verify the PGDG signing-key fingerprint before trusting it for apt (same
+    # rogue-CA/MITM rationale as the GitHub CLI key above).
+    PGDG_KEY_FPR=B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8; \
+    gpg --show-keys --with-colons /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+        | awk -F: '/^fpr:/{print $10}' | grep -qx "$PGDG_KEY_FPR" \
+        || { echo "ERROR: PGDG key fingerprint $PGDG_KEY_FPR not found" >&2; exit 1; }; \
     echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release; echo "$VERSION_CODENAME")-pgdg main" \
         > /etc/apt/sources.list.d/pgdg.list; \
     apt-get update; \
-    apt-get install -y --no-install-recommends postgresql-client-18; \
-    apt-get clean; rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends postgresql-client-18
 
 # ---------------------------------------------------------------------------
 # 2. Modern CLI toolbelt not in apt (eza, zoxide, starship, delta, btm, dust,
 #    procs, sd, hyperfine, tokei, tealdeer, yq, lazygit). Arch-aware.
 # ---------------------------------------------------------------------------
 COPY install-tools.sh /usr/local/bin/install-tools.sh
-RUN chmod +x /usr/local/bin/install-tools.sh && /usr/local/bin/install-tools.sh
+# Cache cargo's registry + git db so cargo-binstall metadata/index isn't re-fetched
+# on every rebuild (runs as root here -> /root/.cargo).
+RUN --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/root/.cargo/git \
+    chmod +x /usr/local/bin/install-tools.sh && /usr/local/bin/install-tools.sh
 
 # ---------------------------------------------------------------------------
-# 3. zsh plugins (direct-source, no oh-my-zsh framework) cloned to a system path
+# 3. zsh plugins (direct-source, no oh-my-zsh framework) cloned to a system path.
+#    Pinned to release tags (NOT branch HEAD): these are sourced into every
+#    interactive shell, so the exact code must be reproducible and tamper-evident.
+#    The expected commit SHA for each tag is asserted after clone — a hijacked
+#    upstream that re-points the tag fails the build. Bump the tag + SHA together.
 # ---------------------------------------------------------------------------
+ARG ZSH_AUTOSUGGESTIONS_TAG=v0.7.1
+ARG ZSH_AUTOSUGGESTIONS_SHA=e52ee8ca55bcc56a17c828767a3f98f22a68d4eb
+ARG ZSH_FAST_SYNTAX_TAG=v1.56
+ARG ZSH_FAST_SYNTAX_SHA=5ecd353c81214f82bdeca5483fab6ccc5a2d5494
+ARG ZSH_COMPLETIONS_TAG=0.36.0
+ARG ZSH_COMPLETIONS_SHA=28c5bdcaf81bb89e56d0df8267d822c3b8aed9e0
 RUN set -eux; \
-    git clone --depth 1 https://github.com/zsh-users/zsh-autosuggestions \
-        /usr/share/zsh-plugins/zsh-autosuggestions; \
-    git clone --depth 1 https://github.com/zdharma-continuum/fast-syntax-highlighting \
-        /usr/share/zsh-plugins/fast-syntax-highlighting; \
-    git clone --depth 1 https://github.com/zsh-users/zsh-completions \
-        /usr/share/zsh-plugins/zsh-completions; \
+    clone_pinned() { \
+        git clone --depth 1 --branch "$2" "$1" "$3"; \
+        got="$(git -C "$3" rev-parse HEAD)"; \
+        [ "$got" = "$4" ] || { echo "ERROR: $1 $2 HEAD $got != expected $4" >&2; exit 1; }; \
+    }; \
+    clone_pinned https://github.com/zsh-users/zsh-autosuggestions \
+        "$ZSH_AUTOSUGGESTIONS_TAG" /usr/share/zsh-plugins/zsh-autosuggestions \
+        "$ZSH_AUTOSUGGESTIONS_SHA"; \
+    clone_pinned https://github.com/zdharma-continuum/fast-syntax-highlighting \
+        "$ZSH_FAST_SYNTAX_TAG" /usr/share/zsh-plugins/fast-syntax-highlighting \
+        "$ZSH_FAST_SYNTAX_SHA"; \
+    clone_pinned https://github.com/zsh-users/zsh-completions \
+        "$ZSH_COMPLETIONS_TAG" /usr/share/zsh-plugins/zsh-completions \
+        "$ZSH_COMPLETIONS_SHA"; \
     rm -rf /usr/share/zsh-plugins/*/.git
 
 # ---------------------------------------------------------------------------
@@ -94,16 +149,37 @@ RUN set -eux; \
 ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global \
     PLAYWRIGHT_BROWSERS_PATH=/usr/local/share/ms-playwright \
     PATH=/usr/local/share/npm-global/bin:$PATH
-RUN set -eux; \
+# Pin pnpm + every global npm tool to an exact version (no floating `latest`), so
+# the toolchain is reproducible build-to-build. `--ignore-scripts` blocks
+# arbitrary install-script execution from these packages / their transitive trees
+# (none of these CLIs need a postinstall to function). Bump deliberately.
+ARG PNPM_VER=11.6.0
+ARG TYPESCRIPT_VER=6.0.3
+ARG TSX_VER=4.22.4
+ARG ESLINT_VER=10.5.0
+ARG PRETTIER_VER=3.8.4
+ARG PYRIGHT_VER=1.1.410
+# playwright npm version is pinned in lockstep with the Chromium pulled by
+# `playwright install chromium` below — they must agree to avoid driver skew.
+ARG PLAYWRIGHT_VER=1.60.0
+# Cache the npm download cache across rebuilds (the in-layer `npm cache clean` is
+# dropped — the cache lives in the BuildKit mount, not the image layer).
+RUN --mount=type=cache,target=/root/.npm \
+    set -eux; \
     mkdir -p "$NPM_CONFIG_PREFIX"; \
     corepack enable; \
-    corepack prepare pnpm@latest --activate; \
-    npm install -g typescript tsx eslint prettier pyright playwright; \
+    corepack prepare "pnpm@${PNPM_VER}" --activate; \
+    npm install -g --ignore-scripts \
+        "typescript@${TYPESCRIPT_VER}" \
+        "tsx@${TSX_VER}" \
+        "eslint@${ESLINT_VER}" \
+        "prettier@${PRETTIER_VER}" \
+        "pyright@${PYRIGHT_VER}" \
+        "playwright@${PLAYWRIGHT_VER}"; \
     # Chromium + its system libs, into the baked (non-volume) browsers path
     playwright install-deps chromium; \
     playwright install chromium; \
-    chmod -R a+rX "$PLAYWRIGHT_BROWSERS_PATH"; \
-    npm cache clean --force
+    chmod -R a+rX "$PLAYWRIGHT_BROWSERS_PATH"
 
 # ---------------------------------------------------------------------------
 # 5. Rename the base `node` user (uid/gid 1000) -> `claude`; wire sudo + dirs
@@ -144,29 +220,36 @@ COPY seed/crontab /usr/local/share/claude-seed/crontab
 COPY init-firewall.sh entrypoint.sh seed-claude.sh init-cron.sh \
      crontab-reload crontab-edit /usr/local/bin/
 COPY config/extra-allowlist.txt /etc/claude-firewall/extra-allowlist.txt
+# The tracked template is baked alongside the (gitignored) real allowlist so a
+# raw `docker compose up --build` on a fresh clone — before gen-allowlist.sh has
+# created the real file — still has a sane allowlist to fall back to. The COPY
+# above still copies config/extra-allowlist.txt (gen-allowlist.sh / the build
+# context guarantees it exists); init-firewall.sh reads this .example only when
+# the real file is missing.
+COPY config/extra-allowlist.txt.example /etc/claude-firewall/extra-allowlist.txt.example
 # Normalize line endings + set exec bits. The CRLF strip is load-bearing for
 # Windows/WSL hosts: if the repo is checked out with CRLF, scripts otherwise die
 # with `bad interpreter: ...^M` and .zshrc/allowlist parse `\r`-tainted lines.
 # Belt-and-suspenders with .gitattributes (which only helps once it's a git repo).
+# The six /usr/local/bin scripts are normalized + chmod'd in a single loop so
+# adding a script means editing only the COPY list above, not three lists here.
 RUN set -eux; \
-    sed -i 's/\r$//' \
-        /usr/local/bin/init-firewall.sh \
-        /usr/local/bin/entrypoint.sh \
-        /usr/local/bin/seed-claude.sh \
-        /usr/local/bin/init-cron.sh \
-        /usr/local/bin/crontab-reload \
-        /usr/local/bin/crontab-edit \
-        /etc/claude-firewall/extra-allowlist.txt \
-        /home/claude/.zshrc \
-        /usr/local/share/claude-seed/CLAUDE.md \
-        /usr/local/share/claude-seed/crontab; \
-    find /home/claude/.config -type f -exec sed -i 's/\r$//' {} +; \
-    chmod +x /usr/local/bin/init-firewall.sh \
+    for f in /usr/local/bin/init-firewall.sh \
              /usr/local/bin/entrypoint.sh \
              /usr/local/bin/seed-claude.sh \
              /usr/local/bin/init-cron.sh \
              /usr/local/bin/crontab-reload \
-             /usr/local/bin/crontab-edit
+             /usr/local/bin/crontab-edit; do \
+        sed -i 's/\r$//' "$f"; \
+        chmod +x "$f"; \
+    done; \
+    sed -i 's/\r$//' \
+        /etc/claude-firewall/extra-allowlist.txt \
+        /etc/claude-firewall/extra-allowlist.txt.example \
+        /home/claude/.zshrc \
+        /usr/local/share/claude-seed/CLAUDE.md \
+        /usr/local/share/claude-seed/crontab; \
+    find /home/claude/.config -type f -exec sed -i 's/\r$//' {} +
 
 # ---------------------------------------------------------------------------
 # 7. Per-user runtime: Python (uv), Claude Code (native installer + auto-update)
@@ -198,13 +281,31 @@ ENV PATH=/home/claude/.local/bin:/usr/local/share/npm-global/bin:/home/claude/.l
 # 3.14, shadowing Debian's /usr/bin/python3 (3.11, left intact for build tooling).
 # `--preview-features python-install-default` is the blessed opt-in for the
 # (still-experimental) default-shim behavior and silences the build-log warning.
+# uv installer pinned to a versioned URL (not the unversioned latest), fetched to
+# a temp file then run — so a broken/partial download aborts the build (pipefail
+# is on via SHELL, but fetch-then-run also avoids executing a half-script). Bump
+# UV_VER deliberately. CPython 3.14 + ruff are pinned to exact versions too.
+ARG UV_VER=0.11.21
+ARG PYTHON_VER=3.14
+ARG RUFF_VER=0.15.17
 RUN set -eux; \
-    curl -LsSf https://astral.sh/uv/install.sh | sh; \
-    uv python install 3.14 --default --preview-features python-install-default; \
-    uv tool install ruff
+    curl -LsSf "https://astral.sh/uv/${UV_VER}/install.sh" -o /tmp/uv-install.sh; \
+    sh /tmp/uv-install.sh; \
+    rm -f /tmp/uv-install.sh; \
+    uv python install "${PYTHON_VER}" --default --preview-features python-install-default; \
+    uv tool install "ruff==${RUFF_VER}"
 
-# Claude Code via the native installer (npm -g is deprecated); auto-updates at startup.
-RUN curl -fsSL https://claude.ai/install.sh | bash
+# Claude Code via the native installer (npm -g is deprecated). DELIBERATE
+# DEVIATION (org pinning standard): the installer always fetches the newest
+# release and the container auto-updates `claude` at every startup (entrypoint.sh
+# step 3), so a hard version pin here would be immediately overwritten and only
+# adds churn. We pin the *channel* to `stable` (not bleeding `latest`) and
+# fetch-then-run so a broken download aborts the build instead of piping a
+# half-script into bash.
+RUN set -eux; \
+    curl -fsSL https://claude.ai/install.sh -o /tmp/claude-install.sh; \
+    bash /tmp/claude-install.sh stable; \
+    rm -f /tmp/claude-install.sh
 
 WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
