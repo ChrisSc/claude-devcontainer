@@ -32,6 +32,8 @@
 # AWS analog of GitHub's /meta) — covering `aws sso login` + the CLI (oidc /
 # portal.sso / sts / s3 / awsapps.com). Optionally narrow by region to shrink the
 # ipset, e.g. `@aws-ip-ranges us-east-1 eu-west-1` (GLOBAL/CloudFront always kept).
+# Region narrowing is validated to retain the GLOBAL prefixes alongside the named
+# region(s); a filter that matches zero CIDRs warns loudly at firewall apply time.
 # Kept active by default: the image ships the AWS CLI, so AWS egress works
 # out of the box. Comment it out if you don't use AWS.
 @aws-ip-ranges
