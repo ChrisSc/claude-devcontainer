@@ -29,9 +29,13 @@ done
 # 2. Seed ~/.claude/CLAUDE.md (copy-if-missing) + always-fresh ENVIRONMENT.md.
 /usr/local/bin/seed-claude.sh || echo "[entrypoint] WARN: seed step failed (non-fatal)" >&2
 
-# 3. Auto-update Claude Code (firewall already allows the update host).
+# 3. Auto-update Claude Code (firewall already allows the update host). Bounded
+#    + stdin detached: the update is explicitly non-essential (postStartCommand
+#    and `claude update` re-run it), so a hung update must not stall the boot
+#    path before `exec "$@"`.
 echo "[entrypoint] checking for Claude Code updates"
-claude update || echo "[entrypoint] WARN: claude update failed (non-fatal)" >&2
+timeout 120 claude update < /dev/null \
+    || echo "[entrypoint] WARN: claude update failed/timed out (non-fatal)" >&2
 
 # 4. Install the persisted crontab + start cron (scheduled Claude agents). After
 #    the firewall so jobs that fire have egress; non-fatal so cron can't brick boot.

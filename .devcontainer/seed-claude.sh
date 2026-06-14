@@ -68,6 +68,11 @@ Regenerated at container start by \`seed-claude.sh\`. See CLAUDE.md for guidance
 - claude: $(ver claude --version)
 - config dir: $CONFIG_DIR
 
+## Database (Postgres sidecar — opt-in via the \`db\` compose profile)
+- DATABASE_URL: $([ -n "${DATABASE_URL:-}" ] && echo "set" || echo "unset (db profile not active / .env absent)")
+- PGHOST: ${PGHOST:-unset}
+- reachable: $(pg_isready -t1 >/dev/null 2>&1 && echo "yes (pg_isready)" || echo "no (sidecar down or not started)")
+
 ## Tooling
 - ripgrep: $(ver rg --version) | fd: $(ver fd --version) | bat: $(ver bat --version)
 - eza: $(ver eza --version) | zoxide: $(ver zoxide --version) | fzf: $(ver fzf --version)
@@ -83,5 +88,6 @@ Regenerated at container start by \`seed-claude.sh\`. See CLAUDE.md for guidance
 - /home/claude/.claude                -> claude-config (this file lives here)
 - /commandhistory                     -> claude-bashhistory
 - /home/claude/.local/share/pnpm      -> claude-pnpm-store
+- (db sidecar) /var/lib/postgresql/data -> claude-pgdata (only with the \`db\` profile)
 EOF
 echo "[seed] regenerated ENVIRONMENT.md"
