@@ -1,6 +1,9 @@
 # Claude Code per-project harness state (scheduled-task locks, local session
-# data). Local-only — never push.
-.claude/
+# data, worktrees). Local-only — never push.
+.claude/*
+# Exception: the versioned audit/remediation Workflow scripts are tracked so they
+# resolve as named workflows from .claude/workflows/ while staying in the repo.
+!.claude/workflows/
 
 # Generated DB secrets (strong password). Never commit; .env.example is the
 # tracked template. Matches .env in any directory.
