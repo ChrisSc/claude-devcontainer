@@ -183,17 +183,30 @@ add_aws_ranges() {
     if [ -n "$region_filter" ]; then
         reg_json="$(printf '%s' "$region_filter" | tr ', ' '\n\n' \
             | grep -v '^$' | jq -R . | jq -s .)"
-        jq_prog='.prefixes[] | select(.service=="AMAZON")
-                 | select((.region=="GLOBAL") or ($reg|index(.region)))
+        # Capture the prefix object as $p BEFORE piping into the region array.
+        # The naive `($reg|index(.region))` rebinds `.` to $reg inside index(),
+        # so `.region` is read off the array (-> error / zero matches) and the
+        # filter silently drops EVERYTHING, GLOBAL included. Binding $p first
+        # keeps `.region` referring to the prefix. GLOBAL is always retained.
+        jq_prog='.prefixes[] | select(.service=="AMAZON") | . as $p
+                 | select($p.region=="GLOBAL" or ($reg|index($p.region)))
                  | .ip_prefix'
     else
         jq_prog='.prefixes[] | select(.service=="AMAZON") | .ip_prefix'
     fi
+    # No blanket `|| true` on the jq stage: a malformed jq program must surface
+    # (a non-zero exit ends the pipeline) rather than failing closed to an empty
+    # set. `aggregate` keeps its `|| true` (best-effort coalescing).
     while read -r cidr; do
-        [[ "$cidr" =~ ^[0-9.]+/[0-9]{1,2}$ ]] || continue
+        is_ipv4_cidr "$cidr" || continue
         ipset add allowed-domains "$cidr" 2>/dev/null && count=$((count + 1))
     done < <(echo "$json" \
-        | jq -r --argjson reg "$reg_json" "$jq_prog" | aggregate -q || true)
+        | jq -r --argjson reg "$reg_json" "$jq_prog" | { aggregate -q || true; })
+    # A region filter that yields zero CIDRs is almost always the silent-narrowing
+    # bug above, not a legitimately empty region — warn loudly so it's visible.
+    if [ -n "$region_filter" ] && [ "$count" -eq 0 ]; then
+        warn "AWS region filter '${region_filter}' matched ZERO CIDRs — check the region name(s); AWS egress will be broken"
+    fi
     log "added ${count} AWS CIDR(s)"
 }
 
@@ -253,22 +266,51 @@ if [ -n "$DOCKER_DNS_RULES" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 2. Baseline allows (DNS / SSH / loopback) before any restriction
+# 2. Baseline allows (DNS / loopback) before any restriction
 # ---------------------------------------------------------------------------
-iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
-iptables -A INPUT  -p udp --sport 53 -j ACCEPT
-iptables -A OUTPUT -p tcp --dport 22 -j ACCEPT
-iptables -A INPUT  -p tcp --sport 22 -m state --state ESTABLISHED -j ACCEPT
+# DNS is SCOPED to the configured resolver(s), NOT a blanket any-destination
+# ACCEPT. An unrestricted udp/53 (and tcp/53) to ANY host is a textbook
+# DNS-tunneling exfil channel that bypasses the allowed-domains ipset entirely.
+# We allow udp+tcp/53 only to the nameservers in /etc/resolv.conf (Docker's
+# embedded resolver is 127.0.0.11; a custom DNS may be a LAN/public IP). tcp/53
+# covers truncated answers. Resolution against any other destination is dropped.
+DNS_SERVERS="$(awk '/^nameserver/ {print $2}' /etc/resolv.conf 2>/dev/null || true)"
+if [ -z "$DNS_SERVERS" ]; then
+    # Fall back to Docker's embedded resolver if resolv.conf yielded nothing —
+    # never leave DNS fully open as a fallback.
+    DNS_SERVERS="127.0.0.11"
+    warn "no nameserver in /etc/resolv.conf — scoping DNS to 127.0.0.11 only"
+fi
+while read -r dns; do
+    is_ipv4_cidr "$dns" || continue
+    iptables -A OUTPUT -p udp -d "$dns" --dport 53 -j ACCEPT
+    iptables -A OUTPUT -p tcp -d "$dns" --dport 53 -j ACCEPT
+    log "DNS egress allowed to ${dns}"
+done <<< "$DNS_SERVERS"
 iptables -A INPUT  -i lo -j ACCEPT
 iptables -A OUTPUT -o lo -j ACCEPT
+# NOTE: there is intentionally no blanket tcp/22 (SSH) allow. git-over-SSH to
+# github.com is covered by the allowed-domains ipset (the meta CIDRs + the
+# pinned github.com A records) via the generic OUTPUT match-set rule in strict
+# mode. An unconditional --dport 22 ACCEPT to any host is an allowlist-bypassing
+# tunnel/exfil channel, so SSH rides the same allowlist as everything else.
 
-# IPv6 baseline: loopback + DNS only. We do NOT mirror the v4 allowlist over v6
-# (no AAAA ipset); instead the v6 stack fails CLOSED (DROP + REJECT below) so no
-# destination bypasses the v4 allowlist over IPv6. Loopback + DNS keep resolution
-# and in-container v6 services working. Don't relax this to a blanket ACCEPT.
+# IPv6 baseline: loopback + (scoped) DNS only. We do NOT mirror the v4 allowlist
+# over v6 (no AAAA ipset); the v6 stack fails CLOSED (DROP + REJECT below) so no
+# destination bypasses the v4 allowlist over IPv6. DNS is scoped to any IPv6
+# nameserver(s) in /etc/resolv.conf — NOT a blanket any-destination allow (same
+# DNS-tunneling concern as v4). Docker's embedded resolver is v4 (127.0.0.11),
+# so typically there are no v6 nameservers and only loopback is opened here.
+# Don't relax this to a blanket ACCEPT.
 if [ "$HAVE_IP6" = "1" ]; then
-    ip6tables -A OUTPUT -p udp --dport 53 -j ACCEPT
-    ip6tables -A INPUT  -p udp --sport 53 -j ACCEPT
+    DNS6_SERVERS="$(awk '/^nameserver/ && $2 ~ /:/ {print $2}' \
+        /etc/resolv.conf 2>/dev/null || true)"
+    while read -r dns6; do
+        [ -z "$dns6" ] && continue
+        ip6tables -A OUTPUT -p udp -d "$dns6" --dport 53 -j ACCEPT
+        ip6tables -A OUTPUT -p tcp -d "$dns6" --dport 53 -j ACCEPT
+        log "DNS egress (v6) allowed to ${dns6}"
+    done <<< "$DNS6_SERVERS"
     ip6tables -A INPUT  -i lo -j ACCEPT
     ip6tables -A OUTPUT -o lo -j ACCEPT
 fi
@@ -313,9 +355,20 @@ if [ -f "$EXTRA_ALLOWLIST" ]; then
         line="$(echo "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
         [ -z "$line" ] && continue
         case "$line" in
-            @aws*)
-                regions="${line#@aws-ip-ranges}"; regions="${regions#@aws}"
+            @aws-ip-ranges)
+                # Bare directive: load ALL AMAZON prefixes (no region filter).
+                add_aws_ranges ""
+                ;;
+            '@aws-ip-ranges '*)
+                # Region-narrowed: everything after the directive is the filter.
+                regions="${line#@aws-ip-ranges }"
                 add_aws_ranges "$regions"
+                ;;
+            @*)
+                # An unrecognized @-directive (typo, future feature). Don't fall
+                # through to the AWS branch with garbage as a region filter —
+                # warn and skip so the mistake is visible, not silently absorbed.
+                warn "unknown @directive: '${line}' — skipping"
                 ;;
             *[0-9].[0-9]*)
                 # Literal IPv4 address or CIDR (e.g. a LAN host / static IP).
