@@ -65,6 +65,13 @@ ALLOWED_DOMAINS=(
 log()  { echo "[firewall] $*"; }
 warn() { echo "[firewall] WARN: $*" >&2; }
 
+# Strict IPv4 / IPv4-CIDR validator. The loose `^[0-9.]+$` guard this replaces
+# admitted malformed addresses (`999.999.0.0`, `1.2.3`, `1...1`) that `ipset add`
+# then silently rejected. Per-octet 0-255, optional `/0-32` prefix.
+IPV4_OCTET='(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])'
+IPV4_RE="^${IPV4_OCTET}\.${IPV4_OCTET}\.${IPV4_OCTET}\.${IPV4_OCTET}(/(3[0-2]|[12]?[0-9]))?$"
+is_ipv4_cidr() { [[ "$1" =~ $IPV4_RE ]]; }
+
 # ---------------------------------------------------------------------------
 # 0. Kernel-capability preflight (portability: some WSL2 kernels lack the
 #    netfilter / ip_set modules this script needs). Probe BEFORE flushing, so a
@@ -84,6 +91,17 @@ firewall_supported() {
     return 0
 }
 
+# Probe the IPv6 stack separately. The egress filter must cover BOTH families or
+# strict default-deny is silently bypassed over IPv6 on a dual-stack host. If
+# ip6tables is usable we mirror the v4 ruleset (fail-closed: DROP + allow only
+# lo/DNS/loaded sets); if the v6 module is absent we treat IPv6 as unavailable
+# (nothing to filter). Non-fatal either way — a v6 gap must never brick boot.
+ip6tables_supported() {
+    command -v ip6tables >/dev/null 2>&1 || return 1
+    ip6tables -t filter -S >/dev/null 2>&1 || return 1
+    return 0
+}
+
 if ! firewall_supported; then
     echo
     echo "  ############################################################"
@@ -96,6 +114,24 @@ if ! firewall_supported; then
     exit 0
 fi
 
+# Serialize overlapping invocations (boot entrypoint vs. `make firewall` /
+# devcontainer postStartCommand). The script mutates kernel-global singletons by
+# fixed name (the allowed-domains ipset, the OUTPUT policy, the mode file); two
+# runs racing can leave a half-filled set or egress wide open. flock on a fixed
+# path makes them run one-at-a-time. Held for the whole reconfiguration; released
+# automatically when the script exits (fd 9 closes).
+exec 9>/run/claude-firewall.lock
+flock 9
+
+# Is the IPv6 stack present and filterable? Captured once; gates every ip6tables
+# block below so a v6-less kernel is a clean no-op (never a hard error).
+if ip6tables_supported; then
+    HAVE_IP6=1
+else
+    HAVE_IP6=0
+    warn "ip6tables unavailable — IPv6 stack not present; v6 egress not filtered"
+fi
+
 # Record the effective mode so later bare re-runs inherit it (see MODE_FILE above).
 mkdir -p "$(dirname "$MODE_FILE")"
 printf '%s\n' "$FIREWALL_MODE" > "$MODE_FILE"
@@ -103,13 +139,15 @@ printf '%s\n' "$FIREWALL_MODE" > "$MODE_FILE"
 # Resolve a domain and add every A record to the ipset. NON-FATAL by design.
 add_domain() {
     local domain="$1" ips ip added=0
-    ips="$(dig +short A "$domain" 2>/dev/null | grep -E '^[0-9.]+$' || true)"
+    ips="$(dig +short A "$domain" 2>/dev/null || true)"
     if [ -z "$ips" ]; then
         warn "could not resolve ${domain} — skipping (not fatal)"
         return 0
     fi
     while read -r ip; do
         [ -z "$ip" ] && continue
+        # dig can emit CNAME chains / odd lines; only feed real IPv4 addrs.
+        is_ipv4_cidr "$ip" || continue
         if ipset add allowed-domains "$ip" 2>/dev/null; then
             added=$((added + 1))
         fi
@@ -169,6 +207,15 @@ iptables -t nat -F; iptables -t nat -X
 iptables -t mangle -F; iptables -t mangle -X
 ipset destroy allowed-domains 2>/dev/null || true
 
+# Flush the IPv6 stack too. Without this, a leftover v6 ruleset from a prior run
+# (or a host that pre-populated ip6tables) would coexist with — and could
+# override — the policy we set below.
+if [ "$HAVE_IP6" = "1" ]; then
+    ip6tables -F; ip6tables -X
+    ip6tables -t mangle -F 2>/dev/null || true
+    ip6tables -t mangle -X 2>/dev/null || true
+fi
+
 # CRITICAL: `iptables -F` flushes rules but NOT the default policy. On a re-run,
 # the leftover OUTPUT=DROP from the previous invocation would block the bootstrap
 # GitHub-meta fetch below (DNS resolves, but the :443 connect is dropped). Reset
@@ -178,6 +225,25 @@ ipset destroy allowed-domains 2>/dev/null || true
 iptables -P INPUT ACCEPT
 iptables -P FORWARD ACCEPT
 iptables -P OUTPUT ACCEPT
+
+# FAIL-CLOSED GUARD. The open window above (and the IPv6 reset below) leaves
+# OUTPUT=ACCEPT while the allowlist is being rebuilt. Under `set -e`, any command
+# failing mid-script (a flaky `ip`/`ipset`/`iptables` call, a killed run) would
+# abort with egress still OPEN. This trap re-clamps OUTPUT (and INPUT) to DROP on
+# ANY exit before the final ruleset is committed; it is cleared (`trap - EXIT`)
+# only after strict-mode DROP+REJECT is in place, and relaxed for the permissive
+# branch (which deliberately ends OUTPUT=ACCEPT). v6 may be absent — non-fatal.
+trap 'iptables -P OUTPUT DROP 2>/dev/null || true
+      iptables -P INPUT DROP 2>/dev/null || true
+      ip6tables -P OUTPUT DROP 2>/dev/null || true
+      ip6tables -P INPUT DROP 2>/dev/null || true' EXIT
+
+# Same ACCEPT-during-reconfigure reset for IPv6; clamped to DROP at the end.
+if [ "$HAVE_IP6" = "1" ]; then
+    ip6tables -P INPUT ACCEPT
+    ip6tables -P FORWARD ACCEPT
+    ip6tables -P OUTPUT ACCEPT
+fi
 
 if [ -n "$DOCKER_DNS_RULES" ]; then
     log "restoring Docker DNS NAT rules"
@@ -195,6 +261,17 @@ iptables -A OUTPUT -p tcp --dport 22 -j ACCEPT
 iptables -A INPUT  -p tcp --sport 22 -m state --state ESTABLISHED -j ACCEPT
 iptables -A INPUT  -i lo -j ACCEPT
 iptables -A OUTPUT -o lo -j ACCEPT
+
+# IPv6 baseline: loopback + DNS only. We do NOT mirror the v4 allowlist over v6
+# (no AAAA ipset); instead the v6 stack fails CLOSED (DROP + REJECT below) so no
+# destination bypasses the v4 allowlist over IPv6. Loopback + DNS keep resolution
+# and in-container v6 services working. Don't relax this to a blanket ACCEPT.
+if [ "$HAVE_IP6" = "1" ]; then
+    ip6tables -A OUTPUT -p udp --dport 53 -j ACCEPT
+    ip6tables -A INPUT  -p udp --sport 53 -j ACCEPT
+    ip6tables -A INPUT  -i lo -j ACCEPT
+    ip6tables -A OUTPUT -o lo -j ACCEPT
+fi
 
 # ---------------------------------------------------------------------------
 # 3. Build the allowed-domains ipset
@@ -245,12 +322,23 @@ if [ -f "$EXTRA_ALLOWLIST" ]; then
                 # add_domain can't handle these — dig would treat the IP as a
                 # hostname and resolve nothing. Add straight to the ipset.
                 cidr="$(echo "$line" | tr -d '[:space:]')"
-                if [[ "$cidr" =~ ^[0-9.]+(/[0-9]{1,2})?$ ]]; then
-                    if ipset add allowed-domains "$cidr" 2>/dev/null; then
+                if is_ipv4_cidr "$cidr"; then
+                    # Operator-supplied literal: surface failures instead of
+                    # swallowing them. ipset returns 1 for BOTH a duplicate and a
+                    # rejected value; inspect stderr to tell them apart so a typo
+                    # doesn't pass silently as a no-op.
+                    if add_err="$(ipset add allowed-domains "$cidr" 2>&1)"; then
                         log "added literal ${cidr}"
+                    elif [[ "$add_err" == *"already added"* ]]; then
+                        log "literal ${cidr} already present (ok)"
+                    else
+                        warn "ipset rejected literal ${cidr}: ${add_err}"
                     fi
                     continue
                 fi
+                # Looks numeric-ish but isn't a valid IPv4/CIDR (e.g. a typo or a
+                # hostname containing digits). Surface it, then try DNS.
+                warn "extra-allowlist entry '${cidr}' is not a valid IPv4/CIDR; treating as hostname"
                 add_domain "$cidr"
                 ;;
             *)
@@ -284,6 +372,13 @@ iptables -P FORWARD DROP
 iptables -A INPUT  -m state --state ESTABLISHED,RELATED -j ACCEPT
 iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 
+if [ "$HAVE_IP6" = "1" ]; then
+    ip6tables -P INPUT DROP
+    ip6tables -P FORWARD DROP
+    ip6tables -A INPUT  -m state --state ESTABLISHED,RELATED -j ACCEPT
+    ip6tables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+fi
+
 case "$FIREWALL_MODE" in
     permissive|dev)
         echo
@@ -293,6 +388,12 @@ case "$FIREWALL_MODE" in
         echo "  ############################################################"
         echo
         iptables -P OUTPUT ACCEPT
+        if [ "$HAVE_IP6" = "1" ]; then
+            ip6tables -P OUTPUT ACCEPT
+        fi
+        # Permissive deliberately ends with OUTPUT OPEN — drop the fail-closed
+        # guard so it doesn't re-clamp to DROP on the exit below.
+        trap - EXIT
         log "firewall configuration complete (permissive)"
         exit 0
         ;;
@@ -300,14 +401,28 @@ case "$FIREWALL_MODE" in
         iptables -P OUTPUT DROP
         iptables -A OUTPUT -m set --match-set allowed-domains dst -j ACCEPT
         iptables -A OUTPUT -j REJECT --reject-with icmp-admin-prohibited
+        # IPv6 fails closed: no v6 allowlist, so DROP + REJECT everything past
+        # the loopback/DNS baseline. No v6 destination bypasses the v4 allowlist.
+        if [ "$HAVE_IP6" = "1" ]; then
+            ip6tables -P OUTPUT DROP
+            ip6tables -A OUTPUT -j REJECT --reject-with icmp6-adm-prohibited
+        fi
         ;;
     *)
         warn "unknown FIREWALL_MODE='${FIREWALL_MODE}', defaulting to strict"
         iptables -P OUTPUT DROP
         iptables -A OUTPUT -m set --match-set allowed-domains dst -j ACCEPT
         iptables -A OUTPUT -j REJECT --reject-with icmp-admin-prohibited
+        if [ "$HAVE_IP6" = "1" ]; then
+            ip6tables -P OUTPUT DROP
+            ip6tables -A OUTPUT -j REJECT --reject-with icmp6-adm-prohibited
+        fi
         ;;
 esac
+
+# Strict ruleset (v4 DROP+REJECT, v6 fail-closed) is now committed — release the
+# fail-closed guard so the verify step's deliberate failures don't trip it.
+trap - EXIT
 
 # ---------------------------------------------------------------------------
 # 5. Verify (strict mode). Negative test is security-critical -> fatal.

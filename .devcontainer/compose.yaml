@@ -19,6 +19,17 @@ services:
     cap_add:
       - NET_ADMIN
       - NET_RAW
+    # Disable IPv6 in the container so there is a single enforced network stack.
+    # The egress firewall's strict default-deny is built on the IPv4 allowlist;
+    # on an IPv6-enabled Docker host, AAAA destinations would otherwise bypass it
+    # entirely. init-firewall.sh ALSO fails the v6 stack closed (ip6tables DROP)
+    # as a backstop, but turning v6 off here removes the dual-stack surface
+    # outright. Harmless if the host has no IPv6. (NET_ADMIN above lets the
+    # container set these; on a kernel that rejects them, compose warns and the
+    # ip6tables fail-closed in init-firewall.sh still covers v6.)
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: "1"
+      net.ipv6.conf.default.disable_ipv6: "1"
     user: claude
     init: true                       # docker-init as PID1: reaps zombies, forwards signals
     working_dir: /workspace
