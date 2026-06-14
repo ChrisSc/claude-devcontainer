@@ -1,0 +1,103 @@
+# CI for the Claude Code sandbox (container definition + config, not an app).
+#
+# Cheap static gates run on every push/PR (no Docker daemon needed):
+#   - shellcheck over the deliverable shell scripts (+ extensionless helpers)
+#   - hadolint over the Dockerfile (config in .hadolint.yaml)
+#   - yamllint + `docker compose config` over compose.yaml
+# The `smoke` job actually builds + boots the image and exercises its wiring;
+# CI runners lack NET_ADMIN/ipset, so it boots with FIREWALL_MODE=permissive.
+#
+# Mirrors `make lint` / `make smoke` so the same checks run locally.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Honors the repo-root .shellcheckrc (severity=warning, disable=SC1091).
+      - uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: .devcontainer
+          # Extensionless helpers shellcheck won't auto-detect by suffix.
+          additional_files: crontab-edit crontab-reload
+
+  hadolint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: .devcontainer/Dockerfile
+          # DL3008/DL3016/DL3018 ignored; DL4006 stays gated (see comments).
+          config: .hadolint.yaml
+
+  yamllint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: yamllint
+        run: |
+          pipx install yamllint
+          yamllint .devcontainer/compose.yaml .github/workflows/ci.yaml
+      - name: compose config
+        run: docker compose -f .devcontainer/compose.yaml config -q
+
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Host preflights the standalone path skips (gen-env / gen-allowlist):
+      # without them the .env/allowlist bind-mount sources are missing and
+      # Docker would create empty dirs in their place.
+      - name: Seed host config (.env + allowlist)
+        run: |
+          bash .devcontainer/gen-env.sh
+          bash .devcontainer/gen-allowlist.sh
+      - name: Build image
+        run: docker compose -f .devcontainer/compose.yaml build
+      - name: Boot container (permissive firewall — runners lack NET_ADMIN/ipset)
+        env:
+          FIREWALL_MODE: permissive
+        run: docker compose -f .devcontainer/compose.yaml up -d
+      - name: Wait for entrypoint to finish seeding
+        run: |
+          for i in $(seq 1 60); do
+            if docker exec claude-code test -f /home/claude/.claude/ENVIRONMENT.md; then
+              echo "seeded after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "ENVIRONMENT.md never appeared; entrypoint failed to seed" >&2
+          docker compose -f .devcontainer/compose.yaml logs
+          exit 1
+      - name: Assert wiring (versions, tools, shims, seed)
+        run: |
+          set -euxo pipefail
+          # claude CLI resolves and runs.
+          docker exec claude-code claude --version
+          # python3 must be the uv-managed 3.14 shim, NOT Debian's /usr/bin 3.11.
+          shim=$(docker exec claude-code bash -lc 'command -v python3')
+          case "$shim" in
+            /home/claude/.local/bin/*) ;;
+            *) echo "python3 resolved to $shim, not the uv shim" >&2; exit 1 ;;
+          esac
+          docker exec claude-code bash -lc 'python3 --version | grep -q "3.14"'
+          # Core toolbelt is on PATH.
+          docker exec claude-code bash -lc 'command -v rg fd bat jq yq aws lazygit'
+          # Seeded orientation snapshot exists.
+          docker exec claude-code test -f /home/claude/.claude/ENVIRONMENT.md
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose -f .devcontainer/compose.yaml logs
+      - name: Tear down
+        if: always()
+        run: docker compose -f .devcontainer/compose.yaml down -v
