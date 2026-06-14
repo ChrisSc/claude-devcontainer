@@ -1,5 +1,6 @@
 # Claude Code Dev Container
 
+[![CI](https://github.com/ChrisSc/devcontainer/actions/workflows/ci.yaml/badge.svg)](https://github.com/ChrisSc/devcontainer/actions/workflows/ci.yaml)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-home-D97757?logo=claude&logoColor=white)](https://claude.com/claude-code)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![pgvector](https://img.shields.io/badge/pgvector-enabled-2F6792?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
