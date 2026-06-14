@@ -1,227 +1,94 @@
 # claude-sandbox
 
-Defines a modernized, security-sandboxed dev container that serves as a
-self-contained home for Claude Code. Everything lives in `.devcontainer/`.
+A modernized, security-sandboxed dev container that is a self-contained home for
+Claude Code. **Container definition + config, not an app** — the deliverable is the
+image and its startup behavior; there's nothing to run on the host. Everything lives
+in `.devcontainer/`.
 
 ## What this repo is (and isn't)
-- It is **container definition + config**, not an application. There is no app to
-  run here on the host; the deliverable is the image and its startup behavior.
 - Target runtime: any Docker host on **arm64 or amd64** — native **Linux**, Docker
-  Desktop on **macOS**, or Docker on **Windows WSL2**. Support is gated on *arch*,
-  not OS: everything runs inside a Linux container, and `install-tools.sh` errors
-  on anything that isn't arm64/amd64. Builds native to the host arch — no
-  `platform:` pin (one would force slow emulation). Native Linux is the cleanest
-  host (iptables/ipset are in-kernel, so the firewall runs fully); macOS/Windows
-  add a Docker Desktop VM layer, which is where the platform caveats below come
-  from (the inode-pinned bind-mount, the WSL2-vs-Hyper-V firewall backend).
-- **Cross-platform invariants:** scripts must stay LF (enforced by
-  `.gitattributes` + a defensive `sed 's/\r$//'` in the Dockerfile) or CRLF from a
-  Windows checkout breaks the entrypoint with `bad interpreter: ...^M`. The
-  firewall needs the Docker **WSL2 backend** on Windows (NET_ADMIN + iptables/ipset
-  kernel support); the legacy Hyper-V backend won't load the rules.
+  Desktop on **macOS**, or **Windows WSL2**. Support is gated on *arch*, not OS
+  (everything runs in a Linux container; `install-tools.sh` errors on
+  non-arm64/amd64). Builds native to the host arch — no `platform:` pin (would force
+  slow emulation). Native Linux runs the firewall fully (iptables/ipset in-kernel);
+  macOS/Windows add a Docker Desktop VM layer — the source of the inode-pinned
+  bind-mount and WSL2-vs-Hyper-V firewall caveats.
+- **Scripts must stay LF** (enforced by `.gitattributes` + a defensive
+  `sed 's/\r$//'` in the Dockerfile); CRLF from a Windows checkout breaks the
+  entrypoint with `bad interpreter: …^M`. The firewall needs Docker's **WSL2
+  backend** on Windows (NET_ADMIN + iptables/ipset); the legacy Hyper-V backend
+  won't load the rules.
 
 ## Build & run
 ```bash
 docker compose -f .devcontainer/compose.yaml up -d --build   # or: make up
 docker exec -it claude-code zsh -l                            # or: make shell
 ```
-Compose project (group) = `claude`; container = `claude-code`.
+Compose project (group) = `claude`; container = `claude-code`. Makefile targets are
+self-documented — each carries a trailing `## …` description.
 
-## How startup works (the non-obvious part)
-`ENTRYPOINT` = `entrypoint.sh`, which runs **in order**: (1) `sudo init-firewall.sh`,
-(2) `seed-claude.sh`, (3) `claude update`, (4) `init-cron.sh` (install persisted
-crontab + start cron), then execs the compose `command` (`sleep infinity`).
-Ordering is load-bearing — the firewall must be up before the auto-update can reach
-`downloads.claude.ai`, and before cron jobs that need egress fire. The VS Code path
-re-runs firewall + update + cron via `devcontainer.json` `postStartCommand` as an
+## Startup order (load-bearing)
+`ENTRYPOINT` = `entrypoint.sh`, in order: (1) `sudo init-firewall.sh`,
+(2) `seed-claude.sh`, (3) `claude update` (bounded by `timeout`, non-fatal),
+(4) `init-cron.sh`, then execs the compose `command` (`sleep infinity`). Ordering
+matters — the firewall must be up before the auto-update reaches
+`downloads.claude.ai` and before cron jobs fire. The VS Code path re-runs
+firewall + update + cron via `devcontainer.json` `postStartCommand` as an
 idempotent safety net.
 
-## Invariants — break these and the container breaks
+## Cross-file invariants
 - **User is `claude`** (uid 1000, renamed from the base image's `node`). The name
   must match across Dockerfile `USER`, compose `user:`, devcontainer `remoteUser`,
   and `$HOME`/`$CLAUDE_CONFIG_DIR`.
-- **Volume-shadowing rule:** anything baked into the image at a path that a named
-  volume mounts over is hidden on first run. Baked files therefore live OUTSIDE
-  volume paths — seed CLAUDE.md at `/usr/local/share/claude-seed/`, dotfiles at
-  `/home/claude` (only `~/.claude`, `~/.local/share/pnpm` are volumes), Playwright
-  browsers at `/usr/local/share/ms-playwright` (NOT the default `~/.cache`).
+- **Volume-shadowing rule:** a file baked at a path a named volume mounts over is
+  hidden on first run. Baked files live OUTSIDE volume paths — seed CLAUDE.md at
+  `/usr/local/share/claude-seed/`, dotfiles at `/home/claude` (only `~/.claude`,
+  `~/.local/share/pnpm` are volumes), Playwright browsers at
+  `/usr/local/share/ms-playwright` (NOT the default `~/.cache`).
 - **`~/.ssh` is a *directory* symlink to `~/.claude/ssh`, not per-file.**
-  `seed-claude.sh` links the whole dir so the key, `config`, and `known_hosts` all
-  persist in the volume. Don't "simplify" it to per-file symlinks (`~/.ssh/config`,
-  `~/.ssh/known_hosts`): OpenSSH's `UpdateHostKeys` (default `yes`) and
-  `ssh-keygen -R` rewrite `known_hosts` via temp-file + atomic rename, which
-  replaces a per-file symlink with a real file in the ephemeral `~/.ssh` and
-  silently reverts to non-persistence.
-- **Build-time vs runtime network:** all installs happen at build time (no
-  firewall). The firewall's allowlist only governs RUNTIME fetches — add a host to
-  the allowlist only if it's needed *after* the container is up.
-- **Firewall resolver is non-fatal per-domain** on purpose (e.g.
-  `statsig.anthropic.com` has no public A record). Don't reintroduce a hard
-  `exit 1` on resolution failure.
-- **Firewall degrades, never bricks.** A preflight (`firewall_supported`) probes
-  for iptables/ipset and, if absent (some WSL2 kernels), prints `FIREWALL
-  DEGRADED` and `exit 0` with egress OPEN — so the container still boots. Keep
-  that path `exit 0`; making a missing-kernel-feature fatal breaks WSL2 hosts.
-- **Firewall resets default policies to ACCEPT before reconfiguring**, then
-  clamps `OUTPUT` back to DROP at the end. This is load-bearing: `iptables -F`
-  flushes rules but NOT the policy, so without the reset a *re-run* inherits the
-  prior `OUTPUT DROP` and blocks its own `api.github.com/meta` bootstrap fetch
-  (DNS resolves, `:443` times out → no GitHub ranges load). Don't remove the
-  `iptables -P ... ACCEPT` block. The upstream Anthropic script has this bug.
-- **`api.github.com/meta` ranges don't cover all of GitHub.** `github.com`
-  (OAuth device-flow + git-over-HTTPS) and release-asset hosts
-  (`objects.githubusercontent.com`, `codeload.github.com`) are pinned explicitly
-  in `init-firewall.sh` — they're NOT in meta. Don't delete them as "redundant";
-  doing so breaks `gh auth refresh` (`no route to host`) and `uv python install`.
-- **AWS egress uses the published CIDR feed, not apex hostnames.** AWS endpoints
-  are wildcard / per-region / CloudFront-fronted, so an `extra-allowlist.txt`
-  *hostname* line can't reach them (a bare `amazonaws.com` has no useful A record;
-  the few that resolve are CloudFront and go stale). Instead, an `@aws-ip-ranges`
-  directive in `extra-allowlist.txt` makes `init-firewall.sh` fetch
-  `ip-ranges.amazonaws.com/ip-ranges.json` (the AWS analog of GitHub's `/meta`)
-  and load the `AMAZON` service prefixes (~1750 CIDRs) — covering `aws sso login`
-  + the CLI (oidc/portal.sso/sts/s3/awsapps). Optional region args narrow the set
-  (`@aws-ip-ranges us-east-1`); `GLOBAL`/CloudFront prefixes are always kept so
-  narrowing can't break login. Don't re-add apex AWS hostnames — they're noise.
-- **Editing a single-file bind mount (`extra-allowlist.txt`) needs a container
-  *restart*, not just a firewall re-run.** The allowlist is bind-mounted as a lone
-  file; on Docker Desktop macOS the mount is inode-pinned, so when an editor
-  replaces the file (write-temp + rename → new inode) the container keeps serving
-  the STALE inode. `docker exec … init-firewall.sh` then re-reads the old content.
-  `docker restart claude-code` re-binds the mount to the current host file (and
-  re-runs the entrypoint firewall). Symptom: host edits to the allowlist appear to
-  have no effect even after re-running the firewall. (`make rebuild` also works —
-  it bakes the file via the Dockerfile `COPY`.)
-- **`extra-allowlist.txt` is gitignored/personal; the tracked file is
-  `extra-allowlist.txt.example`.** A host preflight (`gen-allowlist.sh`, run by
-  `make up`/`rebuild` and `devcontainer.json`'s `initializeCommand`, mirroring
-  `gen-env.sh`/`.env`) seeds the real file from the template if missing. This is
-  load-bearing, not cosmetic: the Dockerfile still `COPY`s `extra-allowlist.txt`
-  and compose bind-mounts it, and a *missing* bind-mount source makes Docker create
-  an empty directory there (→ `init-firewall.sh` reads a dir and breaks). Don't
-  re-track `extra-allowlist.txt` or point the `COPY`/mount at the `.example`.
-- **`FIREWALL_MODE` must be passed explicitly on the `sudo` line.** sudoers has
-  `env_reset` and no `env_keep` for it, so a bare `sudo init-firewall.sh` would
-  never see `FIREWALL_MODE` from compose and always run the script's `:-strict`
-  default. Both call sites therefore use `sudo FIREWALL_MODE="${FIREWALL_MODE:-strict}"
-  /usr/local/bin/init-firewall.sh` (an explicit `VAR=val` assignment survives
-  `env_reset`) — `entrypoint.sh` and `devcontainer.json`'s `postStartCommand`.
-  Don't drop the assignment back to a bare `sudo …`; that silently re-breaks the
-  `permissive`/`dev` switch. As a backstop, the script records the effective
-  mode in `/etc/claude-firewall/mode` and a run with no `FIREWALL_MODE` in env
-  defaults to that file (then `strict`) — so a *bare* re-run (in-container
-  agents re-run `init-firewall.sh` to refresh rotated CDN IPs; `make firewall`)
-  no longer clamps a permissive container back to strict. Don't remove the
-  mode-file write/read; that regression is invisible until an agent's firewall
-  refresh kills permissive egress mid-session.
-- **`docker cp`-ing a script into the running container drops its exec bit**
-  (`sudo: …: command not found`). Source scripts are kept `+x` in git, but
-  `docker cp` applies the host file mode and the Dockerfile's `chmod +x` only
-  runs at build time — so after a cp, `docker exec -u root claude-code chmod +x
-  <path>`. Or just `make rebuild` to bake the change in properly.
-- **`uv python install` needs `--default`.** Without it, only a versioned shim
-  (`python3.14`) is created and bare `python3` falls through to Debian's
-  `/usr/bin/python3` (3.11) — the prompt/tools silently use the wrong interpreter.
-  The `--default --preview-features python-install-default` form adds generic
-  `python`/`python3` shims to `~/.local/bin` (first on PATH); don't drop it.
-- **Timezone is baked into `/etc/localtime` at build time; `TZ` lives in three
-  places that must agree.** `Dockerfile` `ARG TZ` (default `America/New_York`)
-  sets BOTH the env var (glibc CLI tools honor it) AND the `/etc/localtime`
-  symlink + `/etc/timezone`; compose threads `${TZ:-…}` into the build arg *and*
-  the runtime `environment:`. Change only the runtime env and `restart` and you
-  get a split-brain zone — `date` shows the new zone but `/etc/localtime`-readers
-  (e.g. Python `datetime`) keep the baked one. A real zone switch needs a
-  **rebuild** (`TZ=… make rebuild`), not a restart. Don't add in-container NTP:
-  the clock is the host kernel's (Docker keeps its VM synced), so drift isn't the
-  container's to fix.
-- **DB password applies only on first init of `claude-pgdata`.** The generated
-  `.devcontainer/.env` (gitignored; `make env`) is baked into the data volume
-  when Postgres first initializes — changing `.env` later does NOT re-key the
-  running DB. Use `make db-reset` (destroys data) to apply a new password. The
-  db sidecar is opt-in via the `db` compose profile (`make db-up`), and the
-  pg18 *client* in the image must match the server major (older `pg_dump` refuses
-  a newer server) — that's why the Dockerfile pulls `postgresql-client-18` from
-  PGDG, not Debian's 15.
-- **`.env` is read at container *create* time, not start.** compose's `env_file`
-  injects `PG*`/`DATABASE_URL` only when a container is first created, so `.env`
-  must exist *before* `claude-code` is created. The `make up`/`db-up` targets
-  guarantee this (`up: env`), but VS Code "Reopen in Container" and a raw `docker
-  compose up` don't — so `devcontainer.json`'s `initializeCommand` runs
-  `gen-env.sh` on the host to close that gap. Symptom of a container born too
-  early: empty `DATABASE_URL` inside `claude-code` (psql then falls back to the
-  local socket and fails). Fix is `--force-recreate` (a plain `restart` re-reads
-  nothing). The `.env` lives on the host only — the in-container `/workspace` is an
-  isolated volume, so a missing `.env` *there* is normal, not the cause.
-- **Firewall allows the real container subnet, not a guessed /24.** The compose
-  net is a /16; `init-firewall.sh` reads the actual interface CIDR so sidecars
-  (the db) stay reachable even if Docker assigns an IP outside `172.x.0.0/24`.
-  Don't revert it to the `sed`-derived /24 — that silently breaks `db` egress.
-- **Two load-bearing `db` service settings** (both have inline comments — don't
-  "simplify" them away): `PGDATA=/var/lib/postgresql/data/pgdata` (a subdir — the
-  pg18 image refuses to init at the volume mount root) and `PGHOST: ""` (the
-  shared `.env` injects `PGHOST=db` client vars into the *server* container too,
-  which would point its healthcheck at itself over TCP).
-- **Crontab source of truth is `~/.claude/cron/crontab`, re-installed into the
-  spool at boot — NOT symlinked.** Per-user crontabs live in
-  `/var/spool/cron/crontabs` (container layer, wiped on rebuild), and Debian's
-  Vixie cron silently ignores symlinked / wrong-perm crontab files — so the
-  ssh-style directory-symlink trick does NOT work here. `init-cron.sh` instead
-  keeps the crontab as a real file in the `~/.claude` volume and runs
-  `crontab <file>` at boot (a regular file, correct perms). Don't "simplify" this
-  to a symlink into the volume. Edits via bare `crontab -e` hit the ephemeral spool
-  and are lost on rebuild — `crontab-edit`/`crontab-reload` round-trip through the
-  persisted file.
-- **Cron jobs run with a stripped environment**, so the crontab sets
-  `SHELL=/bin/bash` + `BASH_ENV=~/.claude/cron/cron.env`; `init-cron.sh`
-  regenerates `cron.env` each boot from the live `claude` env (`CLAUDE_CONFIG_DIR`,
-  `PATH`, auth paths, ...). Without that, a `claude` job sees neither its config dir
-  nor `~/.local/bin` on PATH. The cron daemon is started root-via-`sudo` with a
-  `pgrep -x cron` guard so entrypoint + `postStartCommand` can't double-start it.
-  No new volume — cron state lives under the existing `~/.claude` (`claude-config`).
-- **Build-time supply chain is PINNED + integrity-gated; bumps are deliberate.**
-  Base image is digest-pinned (`FROM node:24-bookworm@sha256:…`); yq/lazygit/AWS
-  CLI carry explicit `*_VER` constants in `install-tools.sh` with a SHA-256
-  (yq/lazygit) or GPG-signature (AWS CLI) gate before they hit PATH; cargo-binstall
-  is pinned to a release tag (not `main`); pnpm + npm globals + uv/ruff are
-  version-pinned via Dockerfile `ARG`s; zsh plugins clone a release **tag** and
-  assert the expected commit SHA. The two third-party apt keys (GitHub CLI, PGDG)
-  are **fingerprint-verified** before apt trusts them. To bump anything, change the
-  version *and* its paired checksum/SHA/fingerprint together — a mismatch fails the
-  build by design. `.hadolint.yaml` gates the Dockerfile (DL4006 is fixed by the
-  `SHELL […-o pipefail…]` line, NOT ignored — keep that line so `curl | sh` edits
-  stay fail-closed). Don't revert any of these to floating `latest`/`main` or drop
-  a gate.
-- **`.devcontainer/.dockerignore` is default-deny (ignore `*`, re-include only the
-  Dockerfile's COPY sources).** This keeps the generated `.env` (Postgres password)
-  out of the build context. When you add a `COPY` source to the Dockerfile, add a
-  matching `!`-line — otherwise the new file is invisible to the build. Don't widen
-  it to allow-all; that re-ships the secret into the context.
-- **`extra-allowlist.txt.example` is baked next to the real allowlist** so a raw
-  `docker compose up --build` on a fresh clone (before `gen-allowlist.sh` runs)
-  still has an allowlist: `init-firewall.sh` falls back to the baked `.example`
-  when the real `extra-allowlist.txt` is absent. Keep both the `COPY` of the
-  `.example` and the fallback in `init-firewall.sh`.
+  `seed-claude.sh` links the whole dir so key + `config` + `known_hosts` persist.
+  Don't switch to per-file symlinks: OpenSSH's `UpdateHostKeys` / `ssh-keygen -R`
+  rewrite `known_hosts` via temp-file + atomic rename, replacing a per-file symlink
+  with a real file in the ephemeral `~/.ssh` and silently breaking persistence.
+
+## Validation & workflow
+- **Run `make lint` before committing** — it mirrors CI (shellcheck + hadolint +
+  yamllint + `docker compose config`). `make smoke` builds+boots and asserts wiring;
+  `make boot-check` asserts the boot event trail.
+- **CI (`.github/workflows/ci.yaml`) gates every push/PR** with jobs `shellcheck`,
+  `hadolint`, `yamllint`, `smoke`. Lint configs live at repo root (`.shellcheckrc`,
+  `.hadolint.yaml`, `.yamllint`). Two deliberate suppressions you'll re-trip if you
+  "clean them up": shellcheck skips the `home/` **zsh** dotfiles (`ignore_paths:
+  home` — it has no zsh mode) and hadolint ignores **SC1091** (the
+  `. /etc/os-release` PGDG line, a build-only file).
+- **`main` is branch-protected**: required checks must pass, so land changes via PR,
+  not direct push (the repo owner can override). The `remediate-findings` workflow
+  merges on its *own* local validation, not GitHub Actions — under protection its
+  batches now stay as open PRs until CI passes.
+
+## Deep per-script invariants
+Before editing any script in `.devcontainer/` (firewall, build/supply-chain, cron,
+db, observability), read **`.devcontainer/CLAUDE.md`** — it holds the per-subsystem
+errata (firewall fail-closed / IPv6 / DNS-scoping / SSH-via-ipset, pinning gates,
+cron env, db lifecycle, boot-event trail).
 
 ## File map
-- `Dockerfile` — base + all build-time installs; `install-tools.sh` does the
-  non-apt CLI toolbelt (cargo-binstall for Rust tools, direct download for
-  yq/lazygit). All external artifacts are version-pinned + integrity-gated.
-- `.dockerignore` — default-deny build context (keeps `.env` etc. out of the image).
-- `.hadolint.yaml` (repo root) — Dockerfile lint config (gate in CI).
+- `.devcontainer/Dockerfile` + `install-tools.sh` — build-time installs (pinned +
+  integrity-gated); `.dockerignore` keeps `.env` out of the build context.
 - `compose.yaml` / `devcontainer.json` — same container, two entry paths.
 - `init-firewall.sh` — layered default-deny egress (`FIREWALL_MODE`,
   `config/extra-allowlist.txt`).
-- `entrypoint.sh` / `seed-claude.sh` — startup orchestration + `~/.claude` seeding.
-- `init-cron.sh` — install the persisted crontab + start cron at boot;
-  `crontab-edit` / `crontab-reload` are the user-facing helpers (don't shadow the
-  real `crontab`). Crontab template: `seed/crontab`.
-- `home/` — baked dotfiles. `seed/CLAUDE.md` — the in-container orientation doc.
-- DB sidecar: `gen-env.sh` (generates the gitignored `.env` secret; `.env.example`
-  is the template), `db-init/` (initdb scripts — pgvector in `template1`).
+- `entrypoint.sh` / `seed-claude.sh` — startup orchestration + `~/.claude` seeding;
+  `log-event.sh` — boot-event JSONL trail.
+- `init-cron.sh` + `crontab-edit` / `crontab-reload` — persisted crontab (don't
+  shadow the real `crontab`); template `seed/crontab`.
+- `home/` — baked zsh dotfiles. `seed/CLAUDE.md` — the **in-container** orientation
+  doc (different audience: the Claude *using* the sandbox, not editing this repo).
+- DB: `gen-env.sh` (generates the gitignored `.env`; `.env.example` is the
+  template), `db-init/` (initdb scripts — pgvector in `template1`).
+- Repo root: `Makefile`, `.github/workflows/ci.yaml`, the lint configs, `SECURITY.md`.
 
 ## Editing notes
-- These are shell/Docker/JSONC files; the org Python/TS style guides don't apply,
-  but keep the firewall scripts `set -euo pipefail` and resolver failures
-  non-fatal.
-- `devcontainer.json` is JSONC (comments allowed) — don't validate it with strict
-  `jq`.
+- Shell / Docker / JSONC — the org Python/TS style guides don't apply. Keep firewall
+  scripts `set -euo pipefail` with non-fatal resolvers. `devcontainer.json` is JSONC
+  (comments allowed) — don't validate it with strict `jq`.
