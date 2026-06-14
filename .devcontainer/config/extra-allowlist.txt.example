@@ -5,6 +5,12 @@
 # (or restart the container). Mounted read-only at
 # /etc/claude-firewall/extra-allowlist.txt.
 #
+# Docker Desktop macOS caveat: this single-file bind mount is inode-pinned. If you
+# edit with an editor (write-temp + rename) rather than `>>`-appending, re-running
+# init-firewall.sh re-reads the STALE old inode and your edit appears to do
+# nothing. Run `docker restart claude-code` (re-binds the mount) or `make rebuild`,
+# not just a firewall re-run.
+#
 # These supplement the always-on allowlist baked into init-firewall.sh. Use this
 # instead of editing the script. For fully open egress, set FIREWALL_MODE=permissive.
 #

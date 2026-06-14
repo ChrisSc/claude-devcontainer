@@ -28,6 +28,13 @@ any dev container you run locally.
   in-container user.
 - **No host credentials are mounted.** You authenticate (Claude, `gh`, git, ssh)
   *inside* the container; those secrets live in named volumes, not on the host.
+- **Scheduled agents (cron) run unattended.** `cron` jobs execute as `claude` with
+  the persisted in-container auth (Claude, `gh`, git, ssh) and the same allowlisted
+  egress as an interactive session — so a malicious or compromised crontab entry is
+  an exfiltration/abuse vector that runs without anyone watching. The crontab source
+  of truth (`~/.claude/cron/crontab`) lives in the `~/.claude` volume: it is **not**
+  host-editable, but it **is** writable from inside the container, so anything that
+  can write that file can schedule unattended jobs.
 - **DB secret** is generated locally into the gitignored `.devcontainer/.env`
   (`0600`) and is never committed.
 
