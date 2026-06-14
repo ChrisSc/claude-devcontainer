@@ -45,14 +45,18 @@ fi
 # 3. Regenerate the job environment every boot (like seed-claude.sh's ENVIRONMENT.md).
 #    cron runs jobs with a stripped env; the crontab sets SHELL=/bin/bash + BASH_ENV
 #    to this file so every job sources the live `claude` environment (PATH, auth
-#    paths, ...) without per-line boilerplate. Captured from the current process,
-#    so it tracks any Dockerfile ENV change automatically.
+#    paths, ...) without per-line boilerplate. Values are read from the live process,
+#    but the NAMES are an explicit allowlist — add a new var here when you add a new
+#    Dockerfile/compose ENV that cron jobs need (it is NOT auto-discovered).
+#    The PG*/DATABASE_URL vars come from the db sidecar's .env; the ${!name:+x} guard
+#    below skips them harmlessly when the `db` profile isn't running.
 CRON_ENV_VARS=(
     PATH HOME
     CLAUDE_CONFIG_DIR GH_CONFIG_DIR GIT_CONFIG_GLOBAL
     AWS_CONFIG_FILE AWS_SHARED_CREDENTIALS_FILE
     PNPM_HOME NODE_OPTIONS TEALDEER_CACHE_DIR
     NPM_CONFIG_PREFIX PLAYWRIGHT_BROWSERS_PATH
+    PGHOST PGPORT PGUSER PGPASSWORD PGDATABASE DATABASE_URL
     LANG LC_ALL TZ EDITOR VISUAL
 )
 {
