@@ -209,7 +209,12 @@ A shared Postgres 18 + `pgvector` sidecar (`claude-db`) is available so you don'
 re-cobble a database per project. It's **opt-in** via the `db` compose profile —
 nothing starts unless you ask:
 
+The DB commands run the `psql`/`pg_dump` client from *inside* `claude-code`, so
+bring the main container up first (`make up`) — `make db-up` only starts the
+sidecar, not `claude-code`.
+
 ```bash
+make up                     # start claude-code (the DB commands exec into it)
 make db-up                  # start the sidecar (generates .env on first run)
 make db-create DB=myproj    # one DB per project, with pgvector enabled
 make db-psql DB=myproj      # interactive psql

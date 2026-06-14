@@ -32,9 +32,17 @@ active. Most outbound connections FAIL unless the host is allowlisted.
   domains.
 - **Add a domain:** append a hostname to
   `/etc/claude-firewall/extra-allowlist.txt` (editable from the host), then
-  `sudo /usr/local/bin/init-firewall.sh`.
-- **Open the web entirely:** restart with `FIREWALL_MODE=permissive` (see the
-  banner at shell login / ENVIRONMENT.md for the current mode).
+  `sudo /usr/local/bin/init-firewall.sh`. **Docker Desktop macOS caveat:** if the
+  host edits with an editor (write-temp + rename) rather than `>>`-appending, the
+  single-file bind mount is inode-pinned to the old file — re-running the firewall
+  re-reads stale content and the edit appears to do nothing. The host must
+  `docker restart claude-code` (re-binds the mount + re-applies) or `make rebuild`,
+  not just re-run the firewall.
+- **Open the web entirely:** `FIREWALL_MODE` is fixed at container *create* time,
+  so a bare `docker restart` will NOT change it. Ask the host operator to re-create
+  the container, e.g. `FIREWALL_MODE=permissive docker compose -f
+  .devcontainer/compose.yaml up -d --force-recreate` (see the banner at shell login
+  / ENVIRONMENT.md for the current mode).
 - **Intermittent download failures** (pip/uv/playwright) usually mean a CDN
   rotated to an IP captured-at-boot. Re-run `sudo /usr/local/bin/init-firewall.sh`
   to refresh.
