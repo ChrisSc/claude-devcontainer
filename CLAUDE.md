@@ -178,11 +178,36 @@ idempotent safety net.
   nor `~/.local/bin` on PATH. The cron daemon is started root-via-`sudo` with a
   `pgrep -x cron` guard so entrypoint + `postStartCommand` can't double-start it.
   No new volume — cron state lives under the existing `~/.claude` (`claude-config`).
+- **Build-time supply chain is PINNED + integrity-gated; bumps are deliberate.**
+  Base image is digest-pinned (`FROM node:24-bookworm@sha256:…`); yq/lazygit/AWS
+  CLI carry explicit `*_VER` constants in `install-tools.sh` with a SHA-256
+  (yq/lazygit) or GPG-signature (AWS CLI) gate before they hit PATH; cargo-binstall
+  is pinned to a release tag (not `main`); pnpm + npm globals + uv/ruff are
+  version-pinned via Dockerfile `ARG`s; zsh plugins clone a release **tag** and
+  assert the expected commit SHA. The two third-party apt keys (GitHub CLI, PGDG)
+  are **fingerprint-verified** before apt trusts them. To bump anything, change the
+  version *and* its paired checksum/SHA/fingerprint together — a mismatch fails the
+  build by design. `.hadolint.yaml` gates the Dockerfile (DL4006 is fixed by the
+  `SHELL […-o pipefail…]` line, NOT ignored — keep that line so `curl | sh` edits
+  stay fail-closed). Don't revert any of these to floating `latest`/`main` or drop
+  a gate.
+- **`.devcontainer/.dockerignore` is default-deny (ignore `*`, re-include only the
+  Dockerfile's COPY sources).** This keeps the generated `.env` (Postgres password)
+  out of the build context. When you add a `COPY` source to the Dockerfile, add a
+  matching `!`-line — otherwise the new file is invisible to the build. Don't widen
+  it to allow-all; that re-ships the secret into the context.
+- **`extra-allowlist.txt.example` is baked next to the real allowlist** so a raw
+  `docker compose up --build` on a fresh clone (before `gen-allowlist.sh` runs)
+  still has an allowlist: `init-firewall.sh` falls back to the baked `.example`
+  when the real `extra-allowlist.txt` is absent. Keep both the `COPY` of the
+  `.example` and the fallback in `init-firewall.sh`.
 
 ## File map
 - `Dockerfile` — base + all build-time installs; `install-tools.sh` does the
   non-apt CLI toolbelt (cargo-binstall for Rust tools, direct download for
-  yq/lazygit).
+  yq/lazygit). All external artifacts are version-pinned + integrity-gated.
+- `.dockerignore` — default-deny build context (keeps `.env` etc. out of the image).
+- `.hadolint.yaml` (repo root) — Dockerfile lint config (gate in CI).
 - `compose.yaml` / `devcontainer.json` — same container, two entry paths.
 - `init-firewall.sh` — layered default-deny egress (`FIREWALL_MODE`,
   `config/extra-allowlist.txt`).

@@ -1,0 +1,18 @@
+# hadolint config for .devcontainer/Dockerfile.
+#
+# DL4006 (pipefail) is FIXED in the Dockerfile via `SHELL ["/bin/bash", "-o",
+# "pipefail", "-c"]`, so it is NOT ignored here — future `curl | sh` edits stay
+# gated. The rules below are deliberately ignored:
+#
+# DL3008 — apt packages are intentionally not version-pinned. The base image is
+#          digest-pinned, and Debian only ships one version per package in a
+#          given codename's repos; pinning each apt version would force a manual
+#          bump on every security roll for no reproducibility gain over the
+#          digest pin. The two third-party apt keys ARE fingerprint-verified.
+# DL3016 — npm globals ARE pinned to exact versions via build ARGs (the rule
+#          flags the `@version` form it can't statically see through the ARG).
+# DL3018 — apk is not used (Debian base), but kept for parity with the org config.
+ignored:
+  - DL3008
+  - DL3016
+  - DL3018

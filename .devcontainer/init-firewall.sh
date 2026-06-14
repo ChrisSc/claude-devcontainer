@@ -27,6 +27,14 @@ if [ -z "${FIREWALL_MODE:-}" ] && [ -r "$MODE_FILE" ]; then
 fi
 FIREWALL_MODE="${FIREWALL_MODE:-strict}"
 EXTRA_ALLOWLIST="/etc/claude-firewall/extra-allowlist.txt"
+# Resilience for a raw `docker compose up --build` on a fresh clone: if the real
+# allowlist is absent (gen-allowlist.sh hasn't run, or the bind-mount source was
+# missing so Docker created an empty dir there), fall back to the baked tracked
+# template so the firewall still has a sane allowlist instead of breaking.
+EXTRA_ALLOWLIST_FALLBACK="/etc/claude-firewall/extra-allowlist.txt.example"
+if [ ! -f "$EXTRA_ALLOWLIST" ] && [ -f "$EXTRA_ALLOWLIST_FALLBACK" ]; then
+    EXTRA_ALLOWLIST="$EXTRA_ALLOWLIST_FALLBACK"
+fi
 
 # Always-on allowlist. Build-time installs are unaffected (they precede the
 # firewall); these are the hosts needed at RUNTIME.
