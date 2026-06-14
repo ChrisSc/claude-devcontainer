@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-14
+
 A security/quality hardening pass driven by a full audit (summarized in
 `docs/findings/REMEDIATION.md`), plus the project's first CI pipeline. Run
 `make rebuild` to pick up the build-time and firewall changes on an existing
@@ -196,7 +198,8 @@ self-contained home for Claude Code, derived from Anthropic's official
 - MIT license for this repo's original work, `SECURITY.md`, and upstream
   attribution to Anthropic's devcontainer.
 
-[Unreleased]: https://github.com/ChrisSc/devcontainer/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/ChrisSc/devcontainer/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ChrisSc/devcontainer/compare/v0.1.5...v0.2.0
 [0.1.5]: https://github.com/ChrisSc/devcontainer/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/ChrisSc/devcontainer/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/ChrisSc/devcontainer/compare/v0.1.2...v0.1.3
