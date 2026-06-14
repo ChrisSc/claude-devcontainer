@@ -1,5 +1,10 @@
 # Devcontainer Audit — Findings
 
+> **Status: remediated.** This is a point-in-time audit snapshot. The
+> critical/high/medium findings below were addressed in a follow-up pass — see
+> [REMEDIATION.md](REMEDIATION.md) for what changed. Read this as a historical
+> record, not the current state of the container.
+
 ## Executive summary
 
 This audit covers the `claude-sandbox` devcontainer: its Dockerfile and build-time

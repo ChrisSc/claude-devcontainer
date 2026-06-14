@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+A security/quality hardening pass driven by a full audit (summarized in
+`docs/findings/REMEDIATION.md`), plus the project's first CI pipeline. Run
+`make rebuild` to pick up the build-time and firewall changes on an existing
+container.
+
+### Added
+
+- **Continuous integration** (`.github/workflows/ci.yaml`): shellcheck, hadolint,
+  and yamllint static gates plus a `smoke` job that builds the image, boots it, and
+  asserts the wiring (Claude CLI, the uv 3.14 `python3` shim, the toolbelt, the seed
+  doc). `make lint` / `make smoke` run the same checks locally; `main` is now
+  branch-protected on these checks, and the README carries a CI status badge.
+- **Boot-event observability** (`log-event.sh`): the entrypoint, firewall, seed, and
+  cron phases emit a JSONL lifecycle trail under `~/.claude`, correlated by a per-boot
+  `BOOT_ID`. `make boot-check` asserts the expected events fired in order.
+- **IPv6 egress filtering**: `ip6tables` is configured fail-closed in strict mode
+  (with `net.ipv6.conf.*.disable_ipv6` sysctls as a backstop), so a dual-stack host no
+  longer bypasses the allowlist over IPv6.
+- **Container healthcheck** asserting the effective firewall mode, the Claude CLI, the
+  cron daemon, and the seeded `ENVIRONMENT.md`.
+- **`.dockerignore`** (default-deny) so the generated `.env` (the Postgres password)
+  never enters the build context.
+
+### Changed
+
+- **Firewall fails closed.** The window where egress is opened to fetch the GitHub/AWS
+  IP feeds is now guarded by an `EXIT` trap that re-clamps `OUTPUT`/`INPUT` to `DROP` on
+  any mid-apply abort — previously an abort there could leave egress wide open.
+  Concurrent firewall runs serialize on a `flock`.
+- **Reproducible, tamper-evident build.** The base image is digest-pinned and every
+  fetched tool (yq, lazygit, AWS CLI, cargo-binstall, pnpm, the npm globals, uv) is
+  version-pinned and verified by SHA-256 or GPG signature before use; the two
+  third-party apt keys (GitHub CLI, PGDG) are fingerprint-verified. A `SHELL [… -o
+  pipefail …]` directive makes `curl | sh` build layers fail closed.
+- **Lifecycle Make targets are db-profile-aware.** `stop` / `down` / `nuke` now tear
+  down the opt-in `db` sidecar and its volumes, so `make nuke` actually destroys the
+  database data as documented.
+- **`claude update` at boot is time-bounded** (and remains non-fatal), so a slow
+  network can't hang startup.
+- Dropped the `NET_RAW` capability — the firewall needs only `NET_ADMIN`.
+
+### Fixed
+
+- **DNS / SSH exfiltration channels closed.** Strict mode no longer allows blanket
+  `udp/53` or `tcp/22` to any host: DNS is scoped to the resolver(s) in
+  `/etc/resolv.conf`, and git-over-SSH reaches GitHub via the `allowed-domains` ipset.
+- **`@aws-ip-ranges <region>` narrowing** loaded zero CIDRs (a jq bug) and could break
+  AWS login; it now filters correctly and always retains the GLOBAL/CloudFront prefixes.
+- **Cron jobs couldn't reach Postgres** — `cron.env` now includes the `PG*` /
+  `DATABASE_URL` client vars.
+- **VS Code `postStartCommand` swallowed firewall failures** (it always exited 0); a
+  firewall error now propagates while update/cron stay non-fatal.
+- `make db-dump` writes atomically (temp file + rename); `gen-env.sh` re-secures `.env`
+  to `0600`; the zsh `compinit` fast-path guard (which was always-true) is fixed.
+
+### Documentation
+
+- Security/quality **audit** under `docs/findings/`, with a remediation summary
+  (`docs/findings/REMEDIATION.md`).
+- Split `CLAUDE.md` into a lean root plus `.devcontainer/CLAUDE.md` (per-script
+  invariants), reconciled with the hardening above.
+- README: CI badge, `--force-recreate` for the permissive-mode switch, and a DB
+  quickstart precondition.
+
 ## [0.1.5] - 2026-06-09
 
 ### Added

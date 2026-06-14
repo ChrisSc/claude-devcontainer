@@ -208,11 +208,9 @@ Skills copied to `~/.claude/skills` persist across rebuilds (they live in the
 
 A shared Postgres 18 + `pgvector` sidecar (`claude-db`) is available so you don't
 re-cobble a database per project. It's **opt-in** via the `db` compose profile —
-nothing starts unless you ask:
-
-The DB commands run the `psql`/`pg_dump` client from *inside* `claude-code`, so
-bring the main container up first (`make up`) — `make db-up` only starts the
-sidecar, not `claude-code`.
+nothing starts unless you ask. The DB commands run the `psql`/`pg_dump` client from
+*inside* `claude-code`, so bring the main container up first (`make db-up` only
+starts the sidecar, not `claude-code`):
 
 ```bash
 make up                     # start claude-code (the DB commands exec into it)
@@ -296,14 +294,17 @@ own hosts, then `make firewall`. If something can't reach the network:
   to the old file — re-running the firewall re-reads stale content and your edit
   appears to do nothing. Run `docker restart claude-code` instead (re-binds the
   mount and re-applies the rules), or `make rebuild` to bake the change in.
-- Open egress entirely: `FIREWALL_MODE=permissive docker compose -f .devcontainer/compose.yaml up -d`.
+- Open egress entirely: re-create the container in permissive mode —
+  `FIREWALL_MODE=permissive docker compose -f .devcontainer/compose.yaml up -d --force-recreate`.
+  `FIREWALL_MODE` is read at container *create* time, so a plain `up -d` or `restart`
+  on an already-running container won't switch it.
 
 ## Troubleshooting the firewall
 
 **Symptom: `no route to host` / `connect: Timeout` to a host, but DNS resolves.**
 That's the firewall's `REJECT` rule — the destination IP isn't in the
-`allowed-domains` ipset. `dig` works (UDP 53 is always allowed) while `:443`
-connects fail. Fix by allowlisting the host (see Network posture) and re-running
+`allowed-domains` ipset. `dig` works (DNS to the container's resolver is allowed)
+while `:443` connects fail. Fix by allowlisting the host (see Network posture) and re-running
 `make firewall`.
 
 **Symptom: `make firewall` itself times out fetching `api.github.com/meta`**, and
@@ -338,6 +339,7 @@ to an IP not captured at boot. Re-run `make firewall` to refresh the resolved IP
 .devcontainer/
   devcontainer.json    compose.yaml    Dockerfile
   init-firewall.sh     entrypoint.sh   seed-claude.sh    install-tools.sh
+  log-event.sh         # boot-event JSONL trail (sourced by the startup scripts)
   init-cron.sh         crontab-reload  crontab-edit      # scheduled agents (cron)
   gen-env.sh           gen-allowlist.sh   db-init/10-pgvector.sql
   config/extra-allowlist.txt.example    .env.example   # real files generated, gitignored
