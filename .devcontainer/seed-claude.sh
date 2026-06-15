@@ -71,6 +71,7 @@ Regenerated at container start by \`seed-claude.sh\`. See CLAUDE.md for guidance
 - python (managed by uv): $(ver uv run python --version)
 - ruff: $(ver ruff --version)
 - pyright: $(ver pyright --version)
+- java (Temurin OpenJDK, for clientportal.gw): $(command -v java >/dev/null 2>&1 && java -version 2>&1 | head -n1 || echo n/a)
 
 ## Claude Code
 - claude: $(ver claude --version)

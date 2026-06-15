@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Java runtime** — Eclipse Temurin **OpenJDK 11.0.31+11**, baked into the image for
+  JVM workloads (e.g. the IBKR Client Portal Gateway). Pinned to 11 (not 17+) on
+  purpose — a bundled netty reflectively accesses `java.nio.DirectByteBuffer`, fatal
+  on 17+. Fetched from Adoptium's GitHub releases with a per-arch SHA-256 gate, in
+  line with the project's pinned/integrity-verified build convention. `make smoke`
+  now asserts the `java` / `JAVA_HOME` wiring, and the seeded `ENVIRONMENT.md` lists
+  the JVM.
+
+### Changed
+
+- Repository renamed to **claude-devcontainer**; in-repo references and the README CI
+  badge updated to the new path.
+
 ## [0.2.0] - 2026-06-14
 
 A security/quality hardening pass driven by a full audit (summarized in
