@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-06-15
+
+### Added
+
+- **Host access to the IBKR Client Portal Gateway** — publish the gateway's web UI
+  (`clientportal.gw` binds `:5000` inside the container) to the host **loopback only**
+  (`127.0.0.1:5000:5000`), matching the db sidecar's never-public posture. The egress
+  firewall does not block this inbound path: the host connection arrives sourced from
+  the Docker bridge gateway (`172.x.0.1`), which is inside `CONTAINER_CIDR`, so
+  `init-firewall.sh`'s `INPUT` allow accepts it in every mode. Applying it needs a
+  container recreate (`docker compose up -d` / `make rebuild`), and the gateway's own
+  `root/conf.yaml` `ips.allow` must include `172.*` or it rejects the login at the app
+  layer.
+
 ## [0.2.1] - 2026-06-15
 
 ### Added
@@ -215,7 +229,8 @@ self-contained home for Claude Code, derived from Anthropic's official
 - MIT license for this repo's original work, `SECURITY.md`, and upstream
   attribution to Anthropic's devcontainer.
 
-[Unreleased]: https://github.com/ChrisSc/claude-devcontainer/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/ChrisSc/claude-devcontainer/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/ChrisSc/claude-devcontainer/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/ChrisSc/claude-devcontainer/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ChrisSc/claude-devcontainer/compare/v0.1.5...v0.2.0
 [0.1.5]: https://github.com/ChrisSc/claude-devcontainer/compare/v0.1.4...v0.1.5

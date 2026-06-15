@@ -51,6 +51,17 @@ services:
       - pnpm-store:/home/claude/.local/share/pnpm              # pnpm content-addressable store
       # Host-editable extra firewall allowlist (config only, read-only).
       - ./config/extra-allowlist.txt:/etc/claude-firewall/extra-allowlist.txt:ro
+    # Publish the IBKR Client Portal Gateway UI (clientportal.gw binds :5000 in the
+    # container) to the HOST LOOPBACK ONLY — never 0.0.0.0. A brokerage auth gateway
+    # must not be reachable from other machines on the LAN (same posture as the db
+    # sidecar below). Port changes need a container RECREATE (`up -d` / `make
+    # rebuild`), not a restart. NOTE: the egress firewall does NOT block this inbound
+    # path — the host connection arrives sourced from the Docker bridge gateway
+    # (172.x.0.1), which is inside CONTAINER_CIDR, so init-firewall.sh's INPUT allow
+    # accepts it in every mode. The gateway's own root/conf.yaml `ips.allow` must
+    # still include 172.* or it rejects the login at the app layer.
+    ports:
+      - "127.0.0.1:5000:5000"
     # Keep the box alive; the ENTRYPOINT runs firewall -> seed -> update, then execs this.
     command: ["sleep", "infinity"]
     # Assert the boot invariants so a half-booted container (firewall/seed/cron
