@@ -182,7 +182,36 @@ RUN --mount=type=cache,target=/root/.npm \
     chmod -R a+rX "$PLAYWRIGHT_BROWSERS_PATH"
 
 # ---------------------------------------------------------------------------
-# 5. Rename the base `node` user (uid/gid 1000) -> `claude`; wire sudo + dirs
+# 5. Eclipse Temurin (OpenJDK) 11 — required by the IBKR Client Portal Gateway
+#    (`clientportal.gw`). Pinned to jdk-11.0.31+11 + per-arch SHA-256, pulled from
+#    Adoptium's GitHub releases. (At RUNTIME the egress firewall blocks the Adoptium
+#    API/CDN but allowlists GitHub release assets — moot here, the build runs
+#    pre-firewall, but it's why GitHub is the chosen distribution channel.)
+#    Do NOT bump to Java 17+: the gateway's bundled netty-4.1.15 reflectively
+#    accesses java.nio.DirectByteBuffer — a harmless warning on 11, a fatal
+#    InaccessibleObjectException on 17+ (would force --add-opens flags in run.sh).
+#    Bump the version + BOTH arch checksums together (mismatch fails the build).
+#    update-alternatives symlinks java/javac into /usr/bin (already on PATH), so
+#    only JAVA_HOME needs an ENV — the load-bearing final PATH (below) is untouched.
+# ---------------------------------------------------------------------------
+RUN set -eux; \
+    case "$(dpkg --print-architecture)" in \
+      arm64) JDK_ARCH=aarch64; JDK_SHA=257f4d39e060658fc2eb89a803ca43b3f337e64e253f2d94ebae1d85c9ef5f69 ;; \
+      amd64) JDK_ARCH=x64;     JDK_SHA=1e9de64586b519c0a981319489257cabedd9457599f3823424a87c3158fbe939 ;; \
+      *) echo "ERROR: unsupported arch for JDK: $(dpkg --print-architecture)" >&2; exit 1 ;; \
+    esac; \
+    url="https://github.com/adoptium/temurin11-binaries/releases/download/jdk-11.0.31%2B11/OpenJDK11U-jdk_${JDK_ARCH}_linux_hotspot_11.0.31_11.tar.gz"; \
+    curl -fL -o /tmp/jdk11.tar.gz "$url"; \
+    echo "${JDK_SHA}  /tmp/jdk11.tar.gz" | sha256sum -c -; \
+    mkdir -p /usr/lib/jvm; \
+    tar -xzf /tmp/jdk11.tar.gz -C /usr/lib/jvm; \
+    rm /tmp/jdk11.tar.gz; \
+    update-alternatives --install /usr/bin/java  java  /usr/lib/jvm/jdk-11.0.31+11/bin/java  1100; \
+    update-alternatives --install /usr/bin/javac javac /usr/lib/jvm/jdk-11.0.31+11/bin/javac 1100
+ENV JAVA_HOME=/usr/lib/jvm/jdk-11.0.31+11
+
+# ---------------------------------------------------------------------------
+# 6. Rename the base `node` user (uid/gid 1000) -> `claude`; wire sudo + dirs
 # ---------------------------------------------------------------------------
 ARG USERNAME=claude
 RUN set -eux; \
@@ -211,7 +240,7 @@ RUN set -eux; \
         /usr/local/share/npm-global
 
 # ---------------------------------------------------------------------------
-# 6. Baked dotfiles (NOT under any volume path -> never shadowed) + seed + scripts
+# 7. Baked dotfiles (NOT under any volume path -> never shadowed) + seed + scripts
 # ---------------------------------------------------------------------------
 COPY --chown=claude:claude home/.zshrc /home/claude/.zshrc
 COPY --chown=claude:claude home/.config/ /home/claude/.config/
@@ -253,7 +282,7 @@ RUN set -eux; \
     find /home/claude/.config -type f -exec sed -i 's/\r$//' {} +
 
 # ---------------------------------------------------------------------------
-# 7. Per-user runtime: Python (uv), Claude Code (native installer + auto-update)
+# 8. Per-user runtime: Python (uv), Claude Code (native installer + auto-update)
 # ---------------------------------------------------------------------------
 USER claude
 ENV HOME=/home/claude \
