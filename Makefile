@@ -74,6 +74,8 @@ smoke: env allowlist ## Build + boot the image (permissive firewall) and assert 
 	docker exec claude-code bash -lc 'command -v python3 | grep -q "^/home/claude/.local/bin/"'
 	docker exec claude-code bash -lc 'python3 --version | grep -q "3.14"'
 	docker exec claude-code bash -lc 'command -v rg fd bat jq yq aws lazygit'
+	docker exec claude-code bash -lc 'java -version 2>&1 | grep -q "Temurin-11.0.31"'
+	docker exec claude-code bash -lc '[ "$$JAVA_HOME" = /usr/lib/jvm/jdk-11.0.31+11 ]'
 	docker exec claude-code test -f /home/claude/.claude/ENVIRONMENT.md
 	@echo "smoke OK"
 

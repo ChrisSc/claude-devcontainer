@@ -71,11 +71,20 @@ Claude that *uses* the sandbox, not the one editing this repo.)
 - **Everything external is PINNED + integrity-gated; bumps are deliberate.** Base
   image digest-pinned; yq/lazygit by `*_VER` + SHA-256, AWS CLI by GPG signature,
   cargo-binstall by release tag (not `main`), pnpm / npm-globals / uv via Dockerfile
-  ARGs, zsh plugins by tag + asserted commit SHA; the two third-party apt keys
-  (GitHub CLI, PGDG) fingerprint-verified. Bump a version *and* its paired checksum
-  together — a mismatch fails the build by design. Keep the `SHELL [… -o pipefail …]`
-  line (DL4006 fix) so `curl | sh` layers stay fail-closed. Don't revert any to
-  floating `latest`/`main`.
+  ARGs, zsh plugins by tag + asserted commit SHA; Temurin OpenJDK by release tag +
+  per-arch SHA-256; the two third-party apt keys (GitHub CLI, PGDG)
+  fingerprint-verified. Bump a version *and* its paired checksum together — a
+  mismatch fails the build by design. Keep the `SHELL [… -o pipefail …]` line
+  (DL4006 fix) so `curl | sh` layers stay fail-closed. Don't revert any to floating
+  `latest`/`main`.
+- **JDK is pinned to OpenJDK *11* on purpose — do NOT bump to 17+.** Section 5 bakes
+  Eclipse Temurin 11 (for the IBKR `clientportal.gw` gateway) from Adoptium's GitHub
+  releases. The gateway's bundled netty-4.1.15 reflectively accesses
+  `java.nio.DirectByteBuffer`: a harmless warning on 11, a fatal
+  `InaccessibleObjectException` on 17+ (Debian bookworm's only apt OpenJDK), which
+  would force `--add-opens` flags in `run.sh`. `update-alternatives` puts java/javac
+  in `/usr/bin` (already on PATH); only `JAVA_HOME` gets an `ENV` — leave the
+  load-bearing final `PATH` untouched.
 - **`.dockerignore` is default-deny** (ignore `*`, re-include only Dockerfile COPY
   sources) to keep the generated `.env` (Postgres password) out of the build
   context. Add a `!`-line for every new COPY source; don't widen to allow-all.
