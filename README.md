@@ -18,7 +18,7 @@ derived from the official [`anthropics/claude-code/.devcontainer`](https://githu
   to the host arch, no emulation (see [Platform support](#platform-support)).
 - **User:** `claude` (passwordless sudo), zsh + starship.
 - **Languages:** Node 24 / TypeScript / pnpm / tsx, Python 3.14 via `uv` + `ruff`
-  + `pyright`, Playwright + Chromium (baked in).
+  + `pyright`, OpenJDK 11 (Temurin), Playwright + Chromium (baked in).
 - **Toolbelt:** ripgrep, fd, bat, eza, zoxide, fzf, jq, yq, delta, gh, lazygit,
   bottom, dust, procs, sd, hyperfine, tokei, tldr, …
 - **Security:** default-deny egress firewall with an expanded allowlist, a
@@ -48,7 +48,7 @@ and the same Dockerfile builds **native to the host arch** (no emulation, no
    engine**, plus **Settings → Resources → WSL Integration** for your distro.
    The WSL2 backend is required — the firewall uses `NET_ADMIN` + iptables/ipset,
    which need the WSL2 Linux kernel; the legacy Hyper-V backend can't load them.
-2. **Clone the repo *inside* the WSL2 filesystem** (e.g. `~/claude-sandbox`), not
+2. **Clone the repo *inside* the WSL2 filesystem** (e.g. `~/claude-devcontainer`), not
    under `/mnt/c/...`. The Windows-mounted path loses Unix exec bits and is much
    slower for Docker I/O.
 3. Run the same commands as below from your WSL2 shell.
