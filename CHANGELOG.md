@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-06-15
+
 ### Added
 
 - **Java runtime** — Eclipse Temurin **OpenJDK 11.0.31+11**, baked into the image for
@@ -213,7 +215,8 @@ self-contained home for Claude Code, derived from Anthropic's official
 - MIT license for this repo's original work, `SECURITY.md`, and upstream
   attribution to Anthropic's devcontainer.
 
-[Unreleased]: https://github.com/ChrisSc/claude-devcontainer/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ChrisSc/claude-devcontainer/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/ChrisSc/claude-devcontainer/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ChrisSc/claude-devcontainer/compare/v0.1.5...v0.2.0
 [0.1.5]: https://github.com/ChrisSc/claude-devcontainer/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/ChrisSc/claude-devcontainer/compare/v0.1.3...v0.1.4
