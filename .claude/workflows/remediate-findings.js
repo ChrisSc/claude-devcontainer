@@ -473,7 +473,7 @@ function integratePrompt(cluster, fix, gateOk) {
     wt +
     ' push -u origin ' +
     cluster.branch +
-    '\n  gh pr create --repo ChrisSc/devcontainer --base ' +
+    '\n  gh pr create --repo ChrisSc/claude-devcontainer --base ' +
     BASE_BRANCH +
     ' --head ' +
     cluster.branch +
@@ -605,7 +605,7 @@ function documentPrompt(resultsForDoc, newFindings) {
     '"\n  git -C ' +
     wt +
     ' push -u origin docs/remediation-summary\n' +
-    '  gh pr create --repo ChrisSc/devcontainer --base ' +
+    '  gh pr create --repo ChrisSc/claude-devcontainer --base ' +
     BASE_BRANCH +
     ' --head docs/remediation-summary --title "docs: devcontainer remediation' +
     ' summary" --body "Summary of audit remediation. ' +
