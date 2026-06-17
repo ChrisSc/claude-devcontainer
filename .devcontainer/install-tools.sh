@@ -65,18 +65,48 @@ echo "==> Installing Rust CLI tools via cargo-binstall"
 # and verifies the crate checksum against the registry index. Pinning all 11 to
 # exact versions would require an out-of-band bump cadence for low-risk dev CLIs;
 # the registry checksum + --locked is the accepted trade-off here.
-cargo-binstall --no-confirm --locked --install-path /usr/local/bin \
-    eza \
-    zoxide \
-    starship \
-    git-delta \
-    bottom \
-    du-dust \
-    procs \
-    sd \
-    hyperfine \
-    tokei \
-    tealdeer
+RUST_TOOLS=(eza zoxide starship git-delta bottom du-dust procs sd hyperfine tokei tealdeer)
+
+# Resilience to flaky build-host networks (notably WSL2 / Docker Desktop, whose NAT
+# chokes cargo-binstall's concurrent fetcher checks — ~20 simultaneous outbound
+# connections is the observed ceiling). Three guards, all no-ops on a healthy host:
+#   * --disable-strategies compile — NEVER fall back to building from source. This
+#     image ships no Rust toolchain, AND the source path rejects --install-path, so
+#     a single transient fetcher timeout would otherwise hard-fail the build with a
+#     misleading `cargo-install does not support --install-path` (exit 100). All 11
+#     crates publish prebuilt binaries, so the compile strategy is never legitimately
+#     needed here.
+#   * --maximum-resolution-timeout 60 — give each GitHub/QuickInstall lookup room
+#     beyond the stingy 15s default before it's declared timed out.
+#   * install in batches of 4 (≈8 concurrent connections, well under the ceiling)
+#     and retry each batch — 11 crates at once sat right at the edge; batching +
+#     retry rides out a brief NAT/DNS blip. The cargo cache mount makes retries cheap.
+binstall_retry() {  # args: crate names; retries the batch to absorb transient blips
+    local attempt
+    for attempt in 1 2 3; do
+        if cargo-binstall --no-confirm --locked \
+                --disable-strategies compile \
+                --maximum-resolution-timeout 60 \
+                --install-path /usr/local/bin "$@"; then
+            return 0
+        fi
+        echo "WARN: cargo-binstall attempt ${attempt}/3 failed for: $* — retrying" >&2
+        sleep "$((attempt * 8))"
+    done
+    echo "ERROR: cargo-binstall failed after 3 attempts for: $*" >&2
+    return 1
+}
+batch=()
+for tool in "${RUST_TOOLS[@]}"; do
+    batch+=("$tool")
+    if [ "${#batch[@]}" -eq 4 ]; then
+        binstall_retry "${batch[@]}"
+        batch=()
+    fi
+done
+if [ "${#batch[@]}" -gt 0 ]; then
+    binstall_retry "${batch[@]}"
+fi
 
 echo "==> Installing yq ${YQ_VER} (${GO_ARCH})"
 # Pinned version + SHA-256 gate (no /releases/latest redirect, no unverified write).
