@@ -25,7 +25,7 @@ set -euo pipefail
 CARGO_BINSTALL_VER="v1.20.0"   # cargo-bins/cargo-binstall release tag (was `main`)
 YQ_VER="4.53.3"                # mikefarah/yq
 LG_VER="0.62.2"               # jesseduffield/lazygit
-AWS_CLI_VER="2.35.4"          # aws/aws-cli (versioned download path)
+AWS_CLI_VER="2.36.11"         # aws/aws-cli (versioned download path)
 
 # yq publishes per-asset binaries; pin the SHA-256 of each arch's raw binary.
 # Referenced indirectly via ${!yq_sha_var} below, so shellcheck can't see the
