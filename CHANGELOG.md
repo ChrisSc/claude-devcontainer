@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **AWS CLI bumped `2.35.4` → `2.36.11`** (`install-tools.sh` `AWS_CLI_VER`). Routine
+  upstream bump — no paired checksum to update, because the supply-chain gate for this
+  tool pins AWS's public-key *fingerprint* (`AWS_CLI_PGP_FPR`), which is stable across
+  releases, rather than a per-release digest. Both arch bundles
+  (`awscli-exe-linux-{x86_64,aarch64}-2.36.11.zip`) and their detached `.sig` files were
+  confirmed published at the versioned path before the pin moved. Note that the CLI
+  lives at `/usr/local/aws-cli` (not a named volume), so picking this up requires a
+  container **recreate**, not a restart; credentials are unaffected either way since
+  `AWS_CONFIG_FILE`/`AWS_SHARED_CREDENTIALS_FILE` point into the `claude-config` volume.
+
 ## [0.2.3] - 2026-06-15
 
 ### Fixed
