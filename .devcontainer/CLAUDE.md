@@ -149,6 +149,11 @@ Claude that *uses* the sandbox, not the one editing this repo.)
   list least-privileged-first, since position 1 is what an unqualified call uses.
   `AWS_MCP_READ_ONLY=1` restores `--read-only`. All three knobs are compose env vars
   (set per host in `.env`) and take effect on the next container *start*.
+- **SSO login needs `--use-device-code` in this container.** `aws sso login` defaults
+  to the Authorization Code flow, which opens a browser and waits on a `127.0.0.1`
+  redirect listener — bound *inside* the container, so the host browser can never
+  reach it and the login hangs. The Device Code grant prints a URL + code instead.
+  Every doc/hint that shows an `aws sso login` invocation carries the flag; keep it.
 - **`~/.aws` must stay a directory symlink into the volume** (`seed-claude.sh`).
   `AWS_CONFIG_FILE`/`AWS_SHARED_CREDENTIALS_FILE` relocate only `config` and
   `credentials`; the SSO/OIDC **token cache path is not configurable** — the CLI
