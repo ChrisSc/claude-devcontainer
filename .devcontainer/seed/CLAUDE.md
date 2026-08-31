@@ -76,6 +76,7 @@ active. Most outbound connections FAIL unless the host is allowlisted.
 - **Perf/insight:** `hyperfine` (benchmark), `tokei` (LOC count).
 - **Docs:** `tldr` (concise examples — `tldr <cmd>`).
 - **Editors:** `vim`, `nano`. **Prompt:** `starship`.
+- **AWS:** `aws` (CLI v2) plus the **Agent Toolkit for AWS** — see §8.
 
 ## 5. Language toolchains (how to invoke)
 - **Python — use `uv` for everything; never bare `pip`.**
@@ -115,7 +116,8 @@ No host credentials are mounted. Authenticate once inside; it persists in the
   login` write to `$AWS_CONFIG_FILE=~/.claude/aws/config` +
   `$AWS_SHARED_CREDENTIALS_FILE=~/.claude/aws/credentials`, so creds persist in the
   volume across rebuilds. Runtime egress to AWS APIs is allowed via the firewall's
-  `@aws-ip-ranges` directive (see `config/extra-allowlist.txt`).
+  `@aws-ip-ranges` directive (see `config/extra-allowlist.txt`). The AWS MCP
+  server (§8) uses these same credentials.
 - SSH for git: keep the key in the persistent `~/.claude/ssh/` volume — `~/.ssh`
   itself is NOT persistent, so `seed-claude.sh` symlinks the whole `~/.ssh` dir to
   `~/.claude/ssh` on every boot. Make a passphrase-free key (so no ssh-agent is
@@ -139,12 +141,42 @@ No host credentials are mounted. Authenticate once inside; it persists in the
   relinking and no re-accepting host keys. The `gh auth refresh` device flow prints
   a code — open the URL on your host to approve (firewall allows github.com).
 
-## 8. Updating Claude Code
+## 8. Agent Toolkit for AWS (MCP server + skills)
+Registered automatically at every boot by `init-aws-toolkit.sh` — no setup needed.
+- **MCP server `aws-mcp`** proxies to AWS's hosted MCP endpoint
+  (`https://aws-mcp.<region>.api.aws/mcp`) through the pinned local
+  `mcp-proxy-for-aws` binary, which SigV4-signs each call. Check it with
+  `claude mcp list`.
+- **Credentials are required for the server to work AT ALL.** The proxy SigV4-signs
+  every request *including the initial handshake*, so with no resolvable
+  credentials `aws-mcp` doesn't just lose its API tools — it fails to connect, and
+  Claude Code reports the unhelpful `-32602: Invalid request parameters`. Fix it
+  with `aws sso login` (or `aws configure`) using the same `~/.claude/aws` config as
+  the CLI (§7), then restart Claude Code. The boot log says so explicitly, and
+  `~/.claude/logs/boot-events.jsonl` records `aws.credentials.absent`.
+  **The skills (below) work with or without credentials** — they're just documents.
+- **READ-ONLY by default.** The server runs with `--read-only`, so it can inspect,
+  describe, and price resources but not create or delete them. Use the `aws` CLI
+  for deliberate writes, or restart the container with `AWS_MCP_READ_ONLY=0`
+  (a host-side compose env var) to enable the write tools.
+- **Region:** `us-east-1` unless the host sets `AWS_MCP_REGION`. It drives both the
+  MCP endpoint and the skill catalog.
+- **Skills:** the 23-skill `aws-core` set (CDK, CloudFormation, IAM, serverless,
+  containers, networking, observability, billing, Bedrock, the SDK-usage skills,
+  ...) is installed into `~/.claude/skills` at pinned versions. Claude picks them
+  up automatically — you don't need to name them.
+- **More skills:** the full catalog is ~101.
+  `aws agent-toolkit list-available-skills --region us-east-1` to browse,
+  `aws agent-toolkit add-skill --skill-name <n> --agent claude-code --region us-east-1`
+  to add (`--region` is required — the CLI errors with `NoRegion` without it).
+  Restart Claude Code to load a newly added skill.
+
+## 9. Updating Claude Code
 Installed via the native installer; auto-updates at container start (from the
 allowlisted `downloads.claude.ai`). Manual: `claude update`. Health check:
 `claude doctor`. If an update times out, see §2 (firewall).
 
-## 9. Database (Postgres 18 + pgvector)
+## 10. Database (Postgres 18 + pgvector)
 A shared Postgres server with the `vector` extension runs as a sidecar
 (`claude-db`). Opt-in: start it with `make db-up` (off by default).
 - Reach it from here as host **`db`**, port **5432**. Credentials are already in
@@ -163,7 +195,7 @@ A shared Postgres server with the `vector` extension runs as a sidecar
   `make db-reset` destroy it). Back up with `make db-dump` -> ./db-backups (host).
 - If `db` won't resolve/connect, the sidecar likely isn't running: `make db-up`.
 
-## 10. Scheduled agents (cron)
+## 11. Scheduled agents (cron)
 Run Claude agents on a schedule. `cron` is installed and its daemon starts at boot.
 - **Source of truth:** `~/.claude/cron/crontab` (persists in the `~/.claude`
   volume). It is re-installed into the live cron spool at every boot.
@@ -183,11 +215,13 @@ Run Claude agents on a schedule. `cron` is installed and its daemon starts at bo
   `extra-allowlist.txt` (see §2), then re-run the firewall.
 - **Liveness:** `pgrep -x cron` (one process expected).
 
-## 11. Pointers
+## 12. Pointers
 - Firewall: `/usr/local/bin/init-firewall.sh`; extras
   `/etc/claude-firewall/extra-allowlist.txt`.
 - Cron: `~/.claude/cron/crontab` (jobs), `~/.claude/cron/cron.env` (job env),
   `~/.claude/cron/logs/` (output); `crontab-edit` / `crontab-reload`.
+- AWS toolkit: `/usr/local/bin/init-aws-toolkit.sh`; pinned skill list
+  `/usr/local/share/claude-seed/aws-skills.txt`; installed skills `~/.claude/skills`.
 - Shell: `~/.zshrc`, aliases `~/.config/zsh/aliases.zsh`, prompt
   `~/.config/starship.toml`.
 - Live inventory: `~/.claude/ENVIRONMENT.md` (regenerated each boot).

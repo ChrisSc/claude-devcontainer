@@ -72,7 +72,8 @@ Claude that *uses* the sandbox, not the one editing this repo.)
   image digest-pinned; yq/lazygit by `*_VER` + SHA-256, AWS CLI by GPG signature,
   cargo-binstall by release tag (not `main`), pnpm / npm-globals / uv via Dockerfile
   ARGs, zsh plugins by tag + asserted commit SHA; Temurin OpenJDK by release tag +
-  per-arch SHA-256; the two third-party apt keys (GitHub CLI, PGDG)
+  per-arch SHA-256; `mcp-proxy-for-aws` by exact `==` ARG pin; the two third-party
+  apt keys (GitHub CLI, PGDG)
   fingerprint-verified. Bump a version *and* its paired checksum together — a
   mismatch fails the build by design. Keep the `SHELL [… -o pipefail …]` line
   (DL4006 fix) so `curl | sh` layers stay fail-closed. Don't revert any to floating
@@ -99,6 +100,47 @@ Claude that *uses* the sandbox, not the one editing this repo.)
 - **`docker cp` of a script into the running container drops its exec bit** (the
   Dockerfile `chmod +x` only runs at build). After a cp: `docker exec -u root …
   chmod +x <path>`, or `make rebuild`.
+
+## Agent Toolkit for AWS (`init-aws-toolkit.sh`)
+- **The MCP entry is REGENERATED every boot, not seeded once.** `~/.claude` is a
+  persistent volume, so a copy-if-missing registration would freeze the *first*
+  boot's proxy version and flags forever — bumping `MCP_PROXY_FOR_AWS_VER` or
+  flipping `AWS_MCP_READ_ONLY` would rebuild the image and change nothing. The
+  script does `claude mcp remove` then `claude mcp add --scope user`, making the
+  container's declared config authoritative (the `ENVIRONMENT.md` model, not the
+  `CLAUDE.md` one). Don't "fix" this into a seed-once check.
+- **Never probe with `claude mcp list` / `get`.** Both health-check the server,
+  which spawns `mcp-proxy-for-aws` and can hang when no AWS credentials exist.
+  Idempotency comes from remove-then-add; the smoke/CI assertions read the
+  `aws.mcp.registered` boot event instead.
+- **`--region` is mandatory on every `aws agent-toolkit` call.** The skill catalog
+  is *unauthenticated* (it installs fine with no credentials), but botocore still
+  refuses to sign a request without a region, so a container whose
+  `~/.claude/aws/config` is empty fails every skill install with `NoRegion`.
+- **Skills are gated on the SHA-256 of `seed/aws-skills.txt`**, stamped at
+  `~/.claude/aws/.skills-stamp`. A stamp hit short-circuits the whole step, so
+  steady-state boots cost nothing and a skill the user deliberately removed stays
+  removed. The stamp is written ONLY after a clean, complete pass — a partial or
+  budget-truncated run retries next boot. Editing the manifest is what triggers a
+  reconcile; removing a line does NOT uninstall (use `remove-skill`).
+- **Both toolkit endpoints are already covered by `@aws-ip-ranges`.**
+  `aws-mcp.<region>.api.aws` and `agent-toolkit.<region>.api.aws` resolve into
+  CloudFront prefixes tagged `AMAZON`/region `GLOBAL`, which the loader always
+  keeps even under a region narrow. Don't add apex AWS hosts to the allowlist.
+- **No credentials ⇒ the MCP server fails to CONNECT, not just to call APIs.** The
+  proxy SigV4-signs every request including `initialize`, and Claude Code renders
+  that failure as an opaque `-32602: Invalid request parameters`. The script probes
+  with `aws sts get-caller-identity` and logs `aws.credentials.ok` /
+  `aws.credentials.absent` plus a "run `aws sso login`" hint, precisely because the
+  raw symptom is undiagnosable. Absent credentials are normal and user-fixable, so
+  the probe never sets `status=degraded`. (Upstream docs claim credential-free
+  doc/skill-discovery still works over MCP — measured against 1.6.4, it does not.)
+- **Read-only is the default posture** (`AWS_MCP_READ_ONLY=1` → `--read-only`): the
+  server acts as whatever IAM identity is in `~/.claude/aws/credentials`, so
+  mutating real infrastructure is opt-in. Both knobs are compose env vars and take
+  effect on the next container *start*.
+- Every failure path still emits `aws.toolkit.ready` and exits 0 — `make
+  boot-check` requires that event unconditionally, so it must stay unconditional.
 
 ## Cron (`init-cron.sh`)
 - **Crontab source of truth is `~/.claude/cron/crontab`, re-installed into the spool

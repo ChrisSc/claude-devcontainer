@@ -16,11 +16,13 @@
 !seed-claude.sh
 !init-cron.sh
 !log-event.sh
+!init-aws-toolkit.sh
 !crontab-reload
 !crontab-edit
 !home/
 !seed/CLAUDE.md
 !seed/crontab
+!seed/aws-skills.txt
 !config/extra-allowlist.txt
 !config/extra-allowlist.txt.example
 

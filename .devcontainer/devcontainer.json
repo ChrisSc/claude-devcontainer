@@ -59,6 +59,6 @@
   // Firewall failure is FATAL (its nonzero exit propagates as the postStartCommand
   // exit, so VS Code surfaces a failed egress firewall) — only the non-security
   // steps (claude update, cron) are tolerated with `|| true`.
-  "postStartCommand": "export BOOT_ID=poststart-$(date -u +%Y%m%dT%H%M%SZ)-$$; sudo FIREWALL_MODE=${FIREWALL_MODE:-strict} BOOT_ID=${BOOT_ID} /usr/local/bin/init-firewall.sh && { claude update || true; /usr/local/bin/init-cron.sh || true; }",
+  "postStartCommand": "export BOOT_ID=poststart-$(date -u +%Y%m%dT%H%M%SZ)-$$; sudo FIREWALL_MODE=${FIREWALL_MODE:-strict} BOOT_ID=${BOOT_ID} /usr/local/bin/init-firewall.sh && { claude update || true; /usr/local/bin/init-aws-toolkit.sh || true; /usr/local/bin/init-cron.sh || true; }",
   "waitFor": "postStartCommand"
 }

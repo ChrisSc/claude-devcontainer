@@ -66,17 +66,30 @@ lint:      ## Run the static gates locally: shellcheck + hadolint + yamllint + c
 smoke: env allowlist ## Build + boot the image (permissive firewall) and assert its wiring
 	$(COMPOSE) build
 	FIREWALL_MODE=permissive $(COMPOSE) up -d
-	@for i in $$(seq 1 60); do \
-	  docker exec claude-code test -f /home/claude/.claude/ENVIRONMENT.md && break; \
+	@# Wait for the boot pipeline to FINISH, not just to reach seeding. The order is
+	@# firewall -> seed -> claude update -> aws-toolkit -> cron -> exec, so
+	@# ENVIRONMENT.md (step 2 of 6) lands well before the update/AWS/cron steps —
+	@# asserting on it races the rest of boot. cron is the last step before `exec`,
+	@# and the process table is fresh on a recreated container, so it is an exact
+	@# "boot complete" signal (the compose healthcheck uses the same proxy).
+	@for i in $$(seq 1 180); do \
+	  docker exec claude-code pgrep -x cron >/dev/null 2>&1 && break; \
 	  sleep 1; \
 	done
 	docker exec claude-code claude --version
 	docker exec claude-code bash -lc 'command -v python3 | grep -q "^/home/claude/.local/bin/"'
 	docker exec claude-code bash -lc 'python3 --version | grep -q "3.14"'
-	docker exec claude-code bash -lc 'command -v rg fd bat jq yq aws lazygit'
+	docker exec claude-code bash -lc 'command -v rg fd bat jq yq aws lazygit mcp-proxy-for-aws'
 	docker exec claude-code bash -lc 'java -version 2>&1 | grep -q "Temurin-11.0.31"'
 	docker exec claude-code bash -lc '[ "$$JAVA_HOME" = /usr/lib/jvm/jdk-11.0.31+11 ]'
 	docker exec claude-code test -f /home/claude/.claude/ENVIRONMENT.md
+	@# AWS MCP server registration, asserted via the boot journal rather than
+	@# `claude mcp list`/`get` — those health-check the server, which would spawn
+	@# the proxy and can hang when no AWS credentials are configured.
+	@# `jq -se any(...)` not `jq -e select(...)`: with -e the exit status reflects
+	@# the LAST input line only, so a `select` probe passes solely when the event
+	@# happens to be the final line of the journal. Slurp + `any` tests membership.
+	docker exec claude-code bash -lc 'jq -se "any(.[]; .event==\"aws.mcp.registered\")" ~/.claude/logs/boot-events.jsonl >/dev/null'
 	@echo "smoke OK"
 
 boot-check: ## Event-completeness gate: assert the boot pipeline emitted its lifecycle events in order
@@ -85,8 +98,11 @@ boot-check: ## Event-completeness gate: assert the boot pipeline emitted its lif
 	@# Wait for the journal to exist + carry a terminal entrypoint.ready (the boot
 	@# may still be running just after `up`). Then assert the required events are
 	@# present and correctly ordered for the LATEST boot_id. jq is baked in.
+	@# Membership test via slurp + `any`, NOT `jq -e select(...)`: with -e the exit
+	@# status reflects only the LAST input line, so a select probe would pass here
+	@# purely because entrypoint.ready happens to be the journal's final event.
 	@for i in $$(seq 1 60); do \
-	  docker exec claude-code bash -lc 'jq -e "select(.event==\"entrypoint.ready\")" ~/.claude/logs/boot-events.jsonl >/dev/null 2>&1' && break; \
+	  docker exec claude-code bash -lc 'jq -se "any(.[]; .event==\"entrypoint.ready\")" ~/.claude/logs/boot-events.jsonl >/dev/null 2>&1' && break; \
 	  sleep 1; \
 	done
 	@docker exec claude-code bash -lc '\
@@ -98,7 +114,7 @@ boot-check: ## Event-completeness gate: assert the boot pipeline emitted its lif
 	  [ -n "$$bid" ] || { echo "boot-check FAIL: empty journal"; exit 1; }; \
 	  echo "boot-check: auditing boot_id=$$bid"; \
 	  events=$$(jq -r --arg b "$$bid" "select(.boot_id==\$$b)|.event" "$$J"); \
-	  required="firewall.apply.start firewall.complete seed.ssh.linked seed.environment.regenerated cron.installed cron.daemon.started entrypoint.ready"; \
+	  required="firewall.apply.start firewall.complete seed.ssh.linked seed.environment.regenerated aws.mcp.registered aws.toolkit.ready cron.installed cron.daemon.started entrypoint.ready"; \
 	  idx=0; \
 	  ok=1; \
 	  for need in $$required; do \

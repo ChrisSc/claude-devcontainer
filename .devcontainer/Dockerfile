@@ -246,8 +246,9 @@ COPY --chown=claude:claude home/.zshrc /home/claude/.zshrc
 COPY --chown=claude:claude home/.config/ /home/claude/.config/
 COPY seed/CLAUDE.md /usr/local/share/claude-seed/CLAUDE.md
 COPY seed/crontab /usr/local/share/claude-seed/crontab
+COPY seed/aws-skills.txt /usr/local/share/claude-seed/aws-skills.txt
 COPY init-firewall.sh entrypoint.sh seed-claude.sh init-cron.sh log-event.sh \
-     crontab-reload crontab-edit /usr/local/bin/
+     init-aws-toolkit.sh crontab-reload crontab-edit /usr/local/bin/
 COPY config/extra-allowlist.txt /etc/claude-firewall/extra-allowlist.txt
 # The tracked template is baked alongside the (gitignored) real allowlist so a
 # raw `docker compose up --build` on a fresh clone — before gen-allowlist.sh has
@@ -268,6 +269,7 @@ RUN set -eux; \
              /usr/local/bin/seed-claude.sh \
              /usr/local/bin/init-cron.sh \
              /usr/local/bin/log-event.sh \
+             /usr/local/bin/init-aws-toolkit.sh \
              /usr/local/bin/crontab-reload \
              /usr/local/bin/crontab-edit; do \
         sed -i 's/\r$//' "$f"; \
@@ -278,6 +280,7 @@ RUN set -eux; \
         /etc/claude-firewall/extra-allowlist.txt.example \
         /home/claude/.zshrc \
         /usr/local/share/claude-seed/CLAUDE.md \
+        /usr/local/share/claude-seed/aws-skills.txt \
         /usr/local/share/claude-seed/crontab; \
     find /home/claude/.config -type f -exec sed -i 's/\r$//' {} +
 
@@ -315,15 +318,24 @@ ENV PATH=/home/claude/.local/bin:/usr/local/share/npm-global/bin:/home/claude/.l
 # a temp file then run — so a broken/partial download aborts the build (pipefail
 # is on via SHELL, but fetch-then-run also avoids executing a half-script). Bump
 # UV_VER deliberately. CPython 3.14 + ruff are pinned to exact versions too.
+#
+# mcp-proxy-for-aws is the stdio proxy half of the Agent Toolkit for AWS: it signs
+# SigV4 requests to the REMOTE AWS MCP Server endpoint. Installed here (build time,
+# exact `==` pin) rather than left to `uvx` at session start — a floating uvx spec
+# would resolve a fresh version from PyPI every time Claude opens the MCP server,
+# which is both a supply-chain hole and a startup-latency hit. init-aws-toolkit.sh
+# registers it with Claude Code at boot. Requires Python >=3.10,<3.15 (uv 3.14 ok).
 ARG UV_VER=0.11.21
 ARG PYTHON_VER=3.14
 ARG RUFF_VER=0.15.17
+ARG MCP_PROXY_FOR_AWS_VER=1.6.4
 RUN set -eux; \
     curl -LsSf "https://astral.sh/uv/${UV_VER}/install.sh" -o /tmp/uv-install.sh; \
     sh /tmp/uv-install.sh; \
     rm -f /tmp/uv-install.sh; \
     uv python install "${PYTHON_VER}" --default --preview-features python-install-default; \
-    uv tool install "ruff==${RUFF_VER}"
+    uv tool install "ruff==${RUFF_VER}"; \
+    uv tool install "mcp-proxy-for-aws==${MCP_PROXY_FOR_AWS_VER}"
 
 # Claude Code via the native installer (npm -g is deprecated). DELIBERATE
 # DEVIATION (org pinning standard): the installer always fetches the newest

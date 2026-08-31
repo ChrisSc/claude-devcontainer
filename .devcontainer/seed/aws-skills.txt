@@ -1,0 +1,43 @@
+# Agent Toolkit for AWS — default skill set (the `aws-core` catalog category).
+#
+# Installed into ~/.claude/skills by init-aws-toolkit.sh at boot. Format is
+# `<skill-name> <version>`, one per line; `#` comments and blank lines ignored.
+#
+# PINNED deliberately (org supply-chain standard): the catalog's `add-skill`
+# defaults to *latest*, so an unpinned list would silently change what guidance
+# Claude loads on any given boot. Bump versions here as a reviewed diff.
+#
+# init-aws-toolkit.sh keys its "already seeded" stamp on the SHA-256 of this
+# file, so editing it (adding, removing, or re-pinning a skill) is what triggers
+# a reconcile on the next boot. Skills removed from this list are NOT uninstalled
+# — drop them with `aws agent-toolkit remove-skill --skill-name <n> --agent claude-code`.
+#
+# Regenerate the whole list at the current catalog versions with:
+#   aws agent-toolkit list-available-skills --category-filter aws-core \
+#     --region us-east-1 --output json | jq -r '.skills[]|"\(.name) \(.skillVersion)"'
+#
+# The full catalog is ~101 skills; browse the rest with
+# `aws agent-toolkit list-available-skills --region us-east-1`.
+amazon-bedrock v5
+aws-ai-ml v3
+aws-auth v1
+aws-billing-and-cost-management v1
+aws-blocks v1
+aws-cdk v1
+aws-cloudformation v2
+aws-compute v2
+aws-containers v1
+aws-database v1
+aws-deployment v1
+aws-iam v2
+aws-messaging-and-streaming v3
+aws-networking v2
+aws-observability v2
+aws-sdk-js-v3-usage v1
+aws-sdk-python-usage v1
+aws-sdk-swift-usage v1
+aws-security v1
+aws-serverless v2
+aws-storage v1
+launch-with-aws v2
+signing-in-to-aws v1

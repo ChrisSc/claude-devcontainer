@@ -2,12 +2,12 @@
 #
 # log-event.sh — tiny shared structured-event helper for the boot pipeline.
 #
-# SOURCED (not executed) by entrypoint.sh, init-firewall.sh, seed-claude.sh and
-# init-cron.sh. Appends one JSON object per line to a persistent JSONL journal on
-# the claude-config volume so the boot sequence leaves a queryable, timestamped
-# trail that survives the process (the console `echo`/`log()` lines stay as the
-# dev mirror). Every append is FIRE-AND-FORGET (`>> file || true`): logging must
-# never block or fail the boot it is observing.
+# SOURCED (not executed) by entrypoint.sh, init-firewall.sh, seed-claude.sh,
+# init-aws-toolkit.sh and init-cron.sh. Appends one JSON object per line to a
+# persistent JSONL journal on the claude-config volume, so the boot sequence
+# leaves a queryable, timestamped trail that survives the process (the console
+# `echo`/`log()` lines stay as the dev mirror). Every append is FIRE-AND-FORGET
+# (`>> file || true`): logging must never block or fail the boot it is observing.
 #
 # Event shape: {"ts","seq","boot_id","phase","event", ...payload}
 #   ts       ISO-8601 UTC, millisecond precision (date -u +%FT%T.%3NZ)
@@ -16,7 +16,7 @@
 #            advance the same sequence — no gaps, no resets between processes)
 #   boot_id  generated once in entrypoint.sh, exported, and threaded into the
 #            devcontainer postStartCommand re-run so the two boots correlate
-#   phase    the boot phase emitting the event (entrypoint|firewall|seed|cron)
+#   phase    the boot phase emitting the event (entrypoint|firewall|seed|aws|cron)
 #   event    dot-namespaced type, e.g. firewall.apply.start, seed.ssh.linked
 #
 # No `set -e` toggling here — the helper is sourced into scripts that already run
@@ -70,7 +70,7 @@ log_event() {
     # (postStartCommand) under the SAME boot_id keeps counting up rather than
     # restarting, and a brand-new boot starts its own file. The read-increment is
     # not atomic across racing processes, but the boot pipeline is sequential
-    # (entrypoint -> firewall -> seed -> cron), so a collision is not expected;
+    # (entrypoint -> firewall -> seed -> aws -> cron), so a collision is not expected;
     # `seq` exists for ordering within a boot, not as a lock.
     local boot_id="${BOOT_ID:-unknown}"
     counter_file="${logs_dir}/.seq.${boot_id}"

@@ -21,6 +21,9 @@ derived from the official [`anthropics/claude-code/.devcontainer`](https://githu
   + `pyright`, OpenJDK 11 (Temurin), Playwright + Chromium (baked in).
 - **Toolbelt:** ripgrep, fd, bat, eza, zoxide, fzf, jq, yq, delta, gh, lazygit,
   bottom, dust, procs, sd, hyperfine, tokei, tldr, …
+- **AWS:** pinned AWS CLI v2 plus the **Agent Toolkit for AWS**, wired up at boot —
+  the `aws-mcp` MCP server (read-only by default) and the pinned `aws-core` skill
+  set, so Claude has live AWS tools and AWS guidance with no setup.
 - **Security:** default-deny egress firewall with an expanded allowlist, a
   host-editable extra-allowlist, and a `FIREWALL_MODE=permissive` escape hatch.
 - **Persistence:** named volumes for workspace, Claude config/auth, shell

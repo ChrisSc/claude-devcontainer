@@ -73,15 +73,21 @@ jobs:
         env:
           FIREWALL_MODE: permissive
         run: docker compose -f .devcontainer/compose.yaml up -d
-      - name: Wait for entrypoint to finish seeding
+      - name: Wait for the entrypoint to finish booting
+        # Waits for the WHOLE pipeline, not just seeding. Boot order is
+        # firewall -> seed -> claude update -> aws-toolkit -> cron -> exec, so
+        # ENVIRONMENT.md (step 2 of 6) appears well before the later steps and is
+        # not a "boot complete" signal — asserting on it races them. cron is the
+        # last step before `exec`, and the process table is fresh on a new
+        # container, so it pins the end of boot exactly.
         run: |
-          for i in $(seq 1 60); do
-            if docker exec claude-code test -f /home/claude/.claude/ENVIRONMENT.md; then
-              echo "seeded after ${i}s"; exit 0
+          for i in $(seq 1 180); do
+            if docker exec claude-code pgrep -x cron >/dev/null 2>&1; then
+              echo "booted after ${i}s"; exit 0
             fi
             sleep 1
           done
-          echo "ENVIRONMENT.md never appeared; entrypoint failed to seed" >&2
+          echo "cron never started; entrypoint failed to complete" >&2
           docker compose -f .devcontainer/compose.yaml logs
           exit 1
       - name: Assert wiring (versions, tools, shims, seed)
@@ -97,9 +103,20 @@ jobs:
           esac
           docker exec claude-code bash -lc 'python3 --version | grep -q "3.14"'
           # Core toolbelt is on PATH.
-          docker exec claude-code bash -lc 'command -v rg fd bat jq yq aws lazygit'
+          docker exec claude-code bash -lc \
+            'command -v rg fd bat jq yq aws lazygit mcp-proxy-for-aws'
           # Seeded orientation snapshot exists.
           docker exec claude-code test -f /home/claude/.claude/ENVIRONMENT.md
+          # AWS MCP server was registered. Asserted from the boot journal, not
+          # `claude mcp list` — that health-checks (spawns) the server, which can
+          # hang on a runner with no AWS credentials. Skill *downloads* are
+          # deliberately not asserted: that step is network-dependent and degrades.
+          # `jq -se any(...)` not `jq -e select(...)`: with -e the exit status
+          # reflects only the LAST input line, so a select probe passes solely
+          # when the event is the final line of the journal.
+          docker exec claude-code bash -lc \
+            'jq -se "any(.[]; .event==\"aws.mcp.registered\")" \
+               ~/.claude/logs/boot-events.jsonl >/dev/null'
       - name: Dump logs on failure
         if: failure()
         run: docker compose -f .devcontainer/compose.yaml logs
