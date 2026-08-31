@@ -135,8 +135,10 @@ if timeout 15 aws sts get-caller-identity "${probe_args[@]}" >/dev/null 2>&1; th
 else
     echo "[aws-toolkit] NOTE: no usable AWS credentials for" \
          "${default_profile:-the default credential chain} — '${MCP_NAME}' will show" >&2
-    echo "[aws-toolkit]       as 'Failed to connect' until you authenticate, e.g." >&2
-    echo "[aws-toolkit]       \`aws sso login --profile ${default_profile:-<profile>}\`." >&2
+    echo "[aws-toolkit]       as 'Failed to connect' until you authenticate:" >&2
+    echo "[aws-toolkit]         aws sso login --profile ${default_profile:-<profile>} --use-device-code" >&2
+    echo "[aws-toolkit]       (--use-device-code is required here: the default flow" >&2
+    echo "[aws-toolkit]       waits on a 127.0.0.1 redirect inside the container.)" >&2
     echo "[aws-toolkit]       Skills below work regardless." >&2
     log_event aws aws.credentials.absent region "$AWS_MCP_REGION" \
         profile "${default_profile:-<credential-chain>}"

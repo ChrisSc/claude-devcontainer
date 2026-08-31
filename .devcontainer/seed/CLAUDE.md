@@ -117,7 +117,14 @@ No host credentials are mounted. Authenticate once inside; it persists in the
   the persistent volume — `aws sso login` survives rebuilds and does not need
   repeating. (`$AWS_CONFIG_FILE` / `$AWS_SHARED_CREDENTIALS_FILE` point at the same
   place.) With SSO, each profile is logged in separately and expires separately:
-  `aws sso login --profile <name>`. Runtime egress to AWS APIs is allowed via the
+  ```sh
+  aws sso login --profile <name> --use-device-code
+  ```
+  **`--use-device-code` is required in this container.** The default Authorization
+  Code flow opens a browser and waits on a `127.0.0.1` redirect listener — but that
+  listener is *inside* the container, so your host browser can never reach it and the
+  login hangs. The Device Code grant just prints a URL + code you open on the host.
+  Runtime egress to AWS APIs is allowed via the
   firewall's `@aws-ip-ranges` directive (see `config/extra-allowlist.txt`). The AWS
   MCP server (§8) uses these same credentials.
 - SSH for git: keep the key in the persistent `~/.claude/ssh/` volume — `~/.ssh`
@@ -161,8 +168,9 @@ Registered automatically at every boot by `init-aws-toolkit.sh` — no setup nee
   profile is the default identity and the rest are selectable **per tool call** via
   the `aws_profile` parameter — so you can read from one account and act in another
   in the same conversation without restarting anything. `~/.claude/ENVIRONMENT.md`
-  lists the active profiles and which one is the default. Each profile needs its
-  own `aws sso login`; they expire independently.
+  lists the active profiles and which one is the default. Each profile needs its own
+  `aws sso login --profile <name> --use-device-code` (see §7 — the device-code flag
+  is required in this container); they expire independently.
 - **⚠ WRITES ARE ENABLED by default** (`AWS_MCP_READ_ONLY=0`). The MCP tools can
   create, modify, and **delete** real AWS resources with the full IAM permissions of
   the selected profile — in any account in the list, including production if it is

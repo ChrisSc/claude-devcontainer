@@ -84,6 +84,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   preserved rather than dropped. `make boot-check` now requires the new
   `seed.aws.linked` event, and the toolkit's skills stamp moved to
   `~/.claude/aws-toolkit/` so its bookkeeping never surfaces inside the user's AWS dir.
+- **Documented that SSO login needs `--use-device-code` in a container.** `aws sso
+  login` defaults to the Authorization Code flow, which opens a browser and waits on a
+  `127.0.0.1` redirect listener — bound *inside* the container, so a host browser can
+  never reach it and the login hangs. The Device Code grant prints a URL + code to open
+  on the host instead. The boot-time credential hint and the in-container guidance now
+  show `aws sso login --profile <name> --use-device-code`, with the reason.
 - **`make smoke` / CI asserted against a still-booting container.** Both waited for
   `~/.claude/ENVIRONMENT.md`, which the seed step writes at **step 2 of 6** — before
   `claude update`, the AWS toolkit, and cron. Every assertion after that wait was
