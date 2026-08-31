@@ -112,12 +112,14 @@ No host credentials are mounted. Authenticate once inside; it persists in the
 `~/.claude` volume:
 - `gh auth login` (config in `$GH_CONFIG_DIR=~/.claude/gh`).
 - `git config --global user.name/user.email` (`$GIT_CONFIG_GLOBAL=~/.claude/gitconfig`).
-- AWS: the `aws` CLI (v2) is baked into the image. `aws configure` / `aws sso
-  login` write to `$AWS_CONFIG_FILE=~/.claude/aws/config` +
-  `$AWS_SHARED_CREDENTIALS_FILE=~/.claude/aws/credentials`, so creds persist in the
-  volume across rebuilds. Runtime egress to AWS APIs is allowed via the firewall's
-  `@aws-ip-ranges` directive (see `config/extra-allowlist.txt`). The AWS MCP
-  server (§8) uses these same credentials.
+- AWS: the `aws` CLI (v2) is baked into the image. **`~/.aws` is a directory symlink
+  to `~/.claude/aws`**, so config, credentials, AND the SSO token cache all live in
+  the persistent volume — `aws sso login` survives rebuilds and does not need
+  repeating. (`$AWS_CONFIG_FILE` / `$AWS_SHARED_CREDENTIALS_FILE` point at the same
+  place.) With SSO, each profile is logged in separately and expires separately:
+  `aws sso login --profile <name>`. Runtime egress to AWS APIs is allowed via the
+  firewall's `@aws-ip-ranges` directive (see `config/extra-allowlist.txt`). The AWS
+  MCP server (§8) uses these same credentials.
 - SSH for git: keep the key in the persistent `~/.claude/ssh/` volume — `~/.ssh`
   itself is NOT persistent, so `seed-claude.sh` symlinks the whole `~/.ssh` dir to
   `~/.claude/ssh` on every boot. Make a passphrase-free key (so no ssh-agent is
@@ -155,10 +157,19 @@ Registered automatically at every boot by `init-aws-toolkit.sh` — no setup nee
   the CLI (§7), then restart Claude Code. The boot log says so explicitly, and
   `~/.claude/logs/boot-events.jsonl` records `aws.credentials.absent`.
   **The skills (below) work with or without credentials** — they're just documents.
-- **READ-ONLY by default.** The server runs with `--read-only`, so it can inspect,
-  describe, and price resources but not create or delete them. Use the `aws` CLI
-  for deliberate writes, or restart the container with `AWS_MCP_READ_ONLY=0`
-  (a host-side compose env var) to enable the write tools.
+- **Multiple accounts, one server.** If the host set `AWS_MCP_PROFILES`, the first
+  profile is the default identity and the rest are selectable **per tool call** via
+  the `aws_profile` parameter — so you can read from one account and act in another
+  in the same conversation without restarting anything. `~/.claude/ENVIRONMENT.md`
+  lists the active profiles and which one is the default. Each profile needs its
+  own `aws sso login`; they expire independently.
+- **⚠ WRITES ARE ENABLED by default** (`AWS_MCP_READ_ONLY=0`). The MCP tools can
+  create, modify, and **delete** real AWS resources with the full IAM permissions of
+  the selected profile — in any account in the list, including production if it is
+  listed. Treat every mutating call as production-affecting: confirm the target
+  account before acting, and prefer the default (least-privileged) profile unless
+  the user names another. The host can restore describe-only with
+  `AWS_MCP_READ_ONLY=1`.
 - **Region:** `us-east-1` unless the host sets `AWS_MCP_REGION`. It drives both the
   MCP endpoint and the skill catalog.
 - **Skills:** the 23-skill `aws-core` set (CDK, CloudFormation, IAM, serverless,

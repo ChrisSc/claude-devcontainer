@@ -30,10 +30,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `aws sts get-caller-identity`, logs `aws.credentials.ok`/`.absent`, and prints a
     "run `aws sso login`" hint — an absent credential is a normal, user-fixable state,
     so it is reported, not treated as a degraded boot. Skills work regardless.
-  - **Read-only by default.** The proxy runs with `--read-only`, so the MCP tools can
-    inspect and price AWS resources but not mutate them — the server acts as whatever
-    IAM identity is in `~/.claude/aws/credentials`. Opt into writes with
-    `AWS_MCP_READ_ONLY=0`; pick a region with `AWS_MCP_REGION` (default `us-east-1`).
+  - **Multi-account by design (`AWS_MCP_PROFILES`).** The proxy's `--profile` flag is
+    variadic, so one server spans an AWS Organization: the first profile in the
+    space-separated list is the default identity and the rest are selectable **per
+    tool call** via its `aws_profile` parameter, with no restart between accounts.
+    Empty by default (profile names are host-specific) — set it per host in
+    `.devcontainer/.env`, which `gen-env.sh` never rewrites once generated; see
+    `.env.example`. The credential probe targets the *default* profile rather than the
+    ambient chain, since only the first one governs whether the handshake succeeds.
+  - **⚠ Writes are enabled by default** (`AWS_MCP_READ_ONLY=0`). The MCP tools act with
+    the full IAM permissions of the selected profile and can create, modify, and
+    **delete** real resources — in any account in `AWS_MCP_PROFILES`, not just the
+    default. Order that list least-privileged-first, because position 1 is what an
+    unqualified call uses. `AWS_MCP_READ_ONLY=1` passes `--read-only` and restores
+    describe-only; `AWS_MCP_REGION` picks the region (default `us-east-1`). The
+    in-container guidance tells Claude to confirm the target account before mutating.
   - **No firewall change was required.** Both `aws-mcp.<region>.api.aws` and the
     `agent-toolkit.<region>.api.aws` skill catalog resolve into CloudFront prefixes
     tagged `AMAZON`/region `GLOBAL`, which the existing `@aws-ip-ranges` directive
@@ -42,7 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The MCP entry is **re-registered on every boot** rather than seeded once: `~/.claude`
     is a persistent volume, so a copy-if-missing entry would freeze the first boot's
     proxy version and flags forever. Skills are gated on the SHA-256 of the manifest
-    (stamped at `~/.claude/aws/.skills-stamp`), so steady-state boots do no network I/O
+    (stamped at `~/.claude/aws-toolkit/.skills-stamp`), so steady-state boots do no network I/O
     and a deliberately removed skill stays removed. Every failure path is non-fatal and
     still emits `aws.toolkit.ready`, which `make boot-check` now requires along with
     `aws.mcp.registered`.
@@ -61,6 +72,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`aws sso login` did not survive a rebuild.** `AWS_CONFIG_FILE` /
+  `AWS_SHARED_CREDENTIALS_FILE` relocate only `config` and `credentials` into the
+  `claude-config` volume — but the SSO/OIDC **token cache path is not configurable**, so
+  the CLI kept writing `~/.aws/cli/cache/session.db` (and `~/.aws/sso/cache/`) to the
+  container layer, where `make rebuild` destroys it. Config persisted, tokens didn't, so
+  every profile needed a fresh login after each rebuild. `seed-claude.sh` now points
+  `~/.aws` at `~/.claude/aws` as a **directory** symlink — the same fix, and the same
+  per-file-symlink trap (temp-file + atomic rename), as `~/.ssh`. An existing `~/.aws` is
+  migrated into the volume with `cp -an` before the swap, so a live token cache is
+  preserved rather than dropped. `make boot-check` now requires the new
+  `seed.aws.linked` event, and the toolkit's skills stamp moved to
+  `~/.claude/aws-toolkit/` so its bookkeeping never surfaces inside the user's AWS dir.
 - **`make smoke` / CI asserted against a still-booting container.** Both waited for
   `~/.claude/ENVIRONMENT.md`, which the seed step writes at **step 2 of 6** — before
   `claude update`, the AWS toolkit, and cron. Every assertion after that wait was

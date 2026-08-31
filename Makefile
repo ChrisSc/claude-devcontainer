@@ -114,7 +114,7 @@ boot-check: ## Event-completeness gate: assert the boot pipeline emitted its lif
 	  [ -n "$$bid" ] || { echo "boot-check FAIL: empty journal"; exit 1; }; \
 	  echo "boot-check: auditing boot_id=$$bid"; \
 	  events=$$(jq -r --arg b "$$bid" "select(.boot_id==\$$b)|.event" "$$J"); \
-	  required="firewall.apply.start firewall.complete seed.ssh.linked seed.environment.regenerated aws.mcp.registered aws.toolkit.ready cron.installed cron.daemon.started entrypoint.ready"; \
+	  required="firewall.apply.start firewall.complete seed.aws.linked seed.ssh.linked seed.environment.regenerated aws.mcp.registered aws.toolkit.ready cron.installed cron.daemon.started entrypoint.ready"; \
 	  idx=0; \
 	  ok=1; \
 	  for need in $$required; do \

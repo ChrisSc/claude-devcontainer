@@ -22,8 +22,11 @@ derived from the official [`anthropics/claude-code/.devcontainer`](https://githu
 - **Toolbelt:** ripgrep, fd, bat, eza, zoxide, fzf, jq, yq, delta, gh, lazygit,
   bottom, dust, procs, sd, hyperfine, tokei, tldr, …
 - **AWS:** pinned AWS CLI v2 plus the **Agent Toolkit for AWS**, wired up at boot —
-  the `aws-mcp` MCP server (read-only by default) and the pinned `aws-core` skill
-  set, so Claude has live AWS tools and AWS guidance with no setup.
+  the `aws-mcp` MCP server and the pinned `aws-core` skill set, so Claude has live
+  AWS tools and AWS guidance with no setup. Multi-account via `AWS_MCP_PROFILES`
+  (first profile is the default, the rest switch per tool call). Config *and* SSO
+  tokens persist in the `~/.claude` volume, so `aws sso login` survives rebuilds.
+  **Writes are enabled by default** — set `AWS_MCP_READ_ONLY=1` for describe-only.
 - **Security:** default-deny egress firewall with an expanded allowlist, a
   host-editable extra-allowlist, and a `FIREWALL_MODE=permissive` escape hatch.
 - **Persistence:** named volumes for workspace, Claude config/auth, shell

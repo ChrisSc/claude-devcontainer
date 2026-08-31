@@ -47,6 +47,11 @@ safety net.
   `/usr/local/share/claude-seed/`, dotfiles at `/home/claude` (only `~/.claude`,
   `~/.local/share/pnpm` are volumes), Playwright browsers at
   `/usr/local/share/ms-playwright` (NOT the default `~/.cache`).
+- **`~/.aws` is a *directory* symlink to `~/.claude/aws`**, for the same reason:
+  `AWS_CONFIG_FILE`/`AWS_SHARED_CREDENTIALS_FILE` relocate only `config` and
+  `credentials`, while the SSO **token** cache path is not configurable
+  (`~/.aws/cli/cache`, `~/.aws/sso/cache`) — so without the dir symlink every
+  rebuild would force a fresh `aws sso login` for every profile.
 - **`~/.ssh` is a *directory* symlink to `~/.claude/ssh`, not per-file.**
   `seed-claude.sh` links the whole dir so key + `config` + `known_hosts` persist.
   Don't switch to per-file symlinks: OpenSSH's `UpdateHostKeys` / `ssh-keygen -R`
@@ -83,9 +88,10 @@ cron env, db lifecycle, boot-event trail).
 - `entrypoint.sh` / `seed-claude.sh` — startup orchestration + `~/.claude` seeding;
   `log-event.sh` — boot-event JSONL trail.
 - `init-aws-toolkit.sh` + `seed/aws-skills.txt` — Agent Toolkit for AWS: registers
-  the `aws-mcp` MCP server (build-pinned `mcp-proxy-for-aws`, read-only by default)
-  and installs the pinned `aws-core` skill set. Knobs: `AWS_MCP_REGION`,
-  `AWS_MCP_READ_ONLY`.
+  the `aws-mcp` MCP server (build-pinned `mcp-proxy-for-aws`) and installs the
+  pinned `aws-core` skill set. Knobs (per-host, in `.env`): `AWS_MCP_REGION`,
+  `AWS_MCP_PROFILES` (variadic — first is default, rest switchable per call),
+  `AWS_MCP_READ_ONLY` (**default 0 = writes enabled**).
 - `init-cron.sh` + `crontab-edit` / `crontab-reload` — persisted crontab (don't
   shadow the real `crontab`); template `seed/crontab`.
 - `home/` — baked zsh dotfiles. `seed/CLAUDE.md` — the **in-container** orientation
