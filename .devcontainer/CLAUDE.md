@@ -135,10 +135,29 @@ Claude that *uses* the sandbox, not the one editing this repo.)
   raw symptom is undiagnosable. Absent credentials are normal and user-fixable, so
   the probe never sets `status=degraded`. (Upstream docs claim credential-free
   doc/skill-discovery still works over MCP — measured against 1.6.4, it does not.)
-- **Read-only is the default posture** (`AWS_MCP_READ_ONLY=1` → `--read-only`): the
-  server acts as whatever IAM identity is in `~/.claude/aws/credentials`, so
-  mutating real infrastructure is opt-in. Both knobs are compose env vars and take
-  effect on the next container *start*.
+- **`--profile` is variadic and that is the point.** `AWS_MCP_PROFILES` is a
+  space-separated list: the FIRST name is the server's default identity, the rest
+  become selectable per tool call via the proxy's `aws_profile` parameter — one MCP
+  server spanning an AWS Organization. The word-splitting in the script is
+  deliberate (`# shellcheck disable=SC2086`) and guarded by an emptiness test so an
+  unset value can never emit a bare `--profile`. The credential probe targets the
+  *default* profile, not the ambient chain — with a list configured those are
+  different identities and only the first governs the handshake.
+- **WRITES ARE ON BY DEFAULT** (`AWS_MCP_READ_ONLY=0`). The tools act with the full
+  IAM permissions of the selected profile and can create/modify/delete real
+  resources in *any* account in `AWS_MCP_PROFILES` — not just the default. Order the
+  list least-privileged-first, since position 1 is what an unqualified call uses.
+  `AWS_MCP_READ_ONLY=1` restores `--read-only`. All three knobs are compose env vars
+  (set per host in `.env`) and take effect on the next container *start*.
+- **`~/.aws` must stay a directory symlink into the volume** (`seed-claude.sh`).
+  `AWS_CONFIG_FILE`/`AWS_SHARED_CREDENTIALS_FILE` relocate only `config` and
+  `credentials`; the SSO/OIDC **token cache path is not configurable** — the CLI
+  always writes `~/.aws/cli/cache/session.db` and `~/.aws/sso/cache/`. Left on the
+  container layer those die with every rebuild, so config would survive but every
+  profile would need a fresh `aws sso login`. Same per-file-symlink trap as `~/.ssh`:
+  the CLI rewrites these caches via temp-file + atomic rename. Because `~/.aws` now
+  *is* `~/.claude/aws`, the toolkit's own bookkeeping deliberately lives in
+  `~/.claude/aws-toolkit/` instead, so it never shows up inside the user's AWS dir.
 - Every failure path still emits `aws.toolkit.ready` and exits 0 — `make
   boot-check` requires that event unconditionally, so it must stay unconditional.
 

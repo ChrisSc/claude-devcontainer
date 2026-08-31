@@ -19,7 +19,26 @@ install -d -m 700 "$CONFIG_DIR"
 # AWS_CONFIG_FILE / AWS_SHARED_CREDENTIALS_FILE (set in the Dockerfile) point here
 # so `aws configure` / `aws sso login` persist into the ~/.claude volume. The CLI
 # won't create the parent dir for a custom config path, so ensure it exists.
-install -d -m 700 "$CONFIG_DIR/aws"
+AWS_DIR="$CONFIG_DIR/aws"
+install -d -m 700 "$AWS_DIR"
+
+# ...but those two env vars only relocate `config` and `credentials`. The SSO/OIDC
+# TOKEN cache is NOT configurable — the CLI always writes it under ~/.aws
+# (`cli/cache/session.db`, `sso/cache/`), which lives in the container layer and is
+# destroyed by every rebuild. Result without this: config survives, tokens don't,
+# so `aws sso login` has to be re-run for every profile after each `make rebuild`.
+# Same fix as ~/.ssh below — point the whole directory at the volume (see the note
+# there on why a *directory* symlink, not per-file: the CLI rewrites these caches
+# via temp-file + atomic rename, which would replace a per-file symlink).
+if [ ! -L "$HOME/.aws" ] && [ -d "$HOME/.aws" ]; then
+    # One-time migration off the container layer. `-n` (no-clobber) so a live
+    # token cache is preserved without ever overwriting the volume's config.
+    cp -an "$HOME/.aws/." "$AWS_DIR/" 2>/dev/null || true
+    rm -rf "$HOME/.aws"
+fi
+ln -sfn "$AWS_DIR" "$HOME/.aws"
+echo "[seed] linked ~/.aws -> $AWS_DIR"
+log_event seed seed.aws.linked target "$AWS_DIR"
 
 # Static, user-editable guidance: seed once, then leave alone.
 if [ ! -e "$CONFIG_DIR/CLAUDE.md" ] && [ -f "$SEED_SRC" ]; then
@@ -80,9 +99,10 @@ Regenerated at container start by \`seed-claude.sh\`. See CLAUDE.md for guidance
 ## Agent Toolkit for AWS (registered at boot by \`init-aws-toolkit.sh\`)
 - MCP server: \`aws-mcp\` -> https://aws-mcp.${AWS_MCP_REGION:-us-east-1}.api.aws/mcp
 - proxy: $(uv tool list 2>/dev/null | grep -m1 "^mcp-proxy-for-aws" || echo "mcp-proxy-for-aws n/a")
-- region: ${AWS_MCP_REGION:-us-east-1} | read-only: ${AWS_MCP_READ_ONLY:-1} (set AWS_MCP_READ_ONLY=0 + restart to allow writes)
+- region: ${AWS_MCP_REGION:-us-east-1} | read-only: ${AWS_MCP_READ_ONLY:-0} ($([ "${AWS_MCP_READ_ONLY:-0}" = "0" ] && echo "WRITES ENABLED — MCP can mutate real AWS resources" || echo "describes only"))
+- profiles: ${AWS_MCP_PROFILES:-<standard credential chain>} (first = default; others selectable per call via \`aws_profile\`)
 - skills: pinned in /usr/local/share/claude-seed/aws-skills.txt, installed to $CONFIG_DIR/skills
-- AWS API tools need credentials — run \`aws configure\` or \`aws sso login\`
+- credentials: $(timeout 10 aws sts get-caller-identity --query Arn --output text 2>/dev/null || echo "NONE — run \`aws sso login\`; the MCP server cannot connect without them")
 
 ## Database (Postgres sidecar — opt-in via the \`db\` compose profile)
 - DATABASE_URL: $([ -n "${DATABASE_URL:-}" ] && echo "set" || echo "unset (db profile not active / .env absent)")
@@ -102,6 +122,8 @@ Regenerated at container start by \`seed-claude.sh\`. See CLAUDE.md for guidance
 ## Persistent volumes (survive rebuilds; removed only by \`docker compose down -v\`)
 - /workspace                          -> claude-workspace
 - /home/claude/.claude                -> claude-config (this file lives here)
+- /home/claude/.aws  (symlink)        -> claude-config:/aws  (AWS config + SSO tokens)
+- /home/claude/.ssh  (symlink)        -> claude-config:/ssh  (git key + known_hosts)
 - /commandhistory                     -> claude-bashhistory
 - /home/claude/.local/share/pnpm      -> claude-pnpm-store
 - (db sidecar) /var/lib/postgresql/data -> claude-pgdata (only with the \`db\` profile)

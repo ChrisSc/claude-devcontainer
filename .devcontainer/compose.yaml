@@ -45,12 +45,22 @@ services:
       FIREWALL_MODE: ${FIREWALL_MODE:-strict}
       TZ: ${TZ:-America/New_York}
       # Agent Toolkit for AWS (init-aws-toolkit.sh). Region drives both the MCP
-      # endpoint host and the `aws agent-toolkit` skill-catalog calls. Read-only
-      # is the default posture: the AWS MCP Server acts as whatever IAM identity
-      # is in ~/.claude/aws/credentials, so writes are opt-in. Both take effect on
-      # the next container START (the MCP entry is re-registered every boot).
+      # endpoint host and the `aws agent-toolkit` skill-catalog calls. All three
+      # take effect on the next container START (the MCP entry is re-registered
+      # every boot), and all three are meant to be set per-host in .env.
       AWS_MCP_REGION: ${AWS_MCP_REGION:-us-east-1}
-      AWS_MCP_READ_ONLY: ${AWS_MCP_READ_ONLY:-1}
+      # Space-separated AWS profile names. The FIRST is the server's default; the
+      # rest become selectable per tool call via the proxy's `aws_profile`
+      # parameter. Empty (the shipped default) omits --profile entirely, leaving
+      # the standard credential chain / AWS_PROFILE in charge. Profile names are
+      # host-specific, so set your own list in .env — see .env.example.
+      AWS_MCP_PROFILES: ${AWS_MCP_PROFILES:-}
+      # 1 = pass --read-only (server can describe but not mutate). Default 0:
+      # the MCP tools can CREATE, MODIFY and DELETE real AWS resources with the
+      # permissions of the selected profile. With a multi-profile list above,
+      # that includes every account in the list — order it so the least
+      # privileged account is first, since that one is the unqualified default.
+      AWS_MCP_READ_ONLY: ${AWS_MCP_READ_ONLY:-0}
     volumes:
       - workspace:/workspace                                   # isolated code (no host path)
       - config:/home/claude/.claude                            # Claude state/auth/gh/git/CLAUDE.md

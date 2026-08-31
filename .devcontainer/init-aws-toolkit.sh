@@ -24,7 +24,10 @@ command -v log_event >/dev/null 2>&1 || log_event() { :; }
 
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 MANIFEST="${AWS_SKILLS_MANIFEST:-/usr/local/share/claude-seed/aws-skills.txt}"
-STATE_DIR="$CONFIG_DIR/aws"
+# Deliberately NOT $CONFIG_DIR/aws: seed-claude.sh symlinks ~/.aws at that
+# directory, so anything we drop there would surface inside the user's AWS
+# config dir. Our bookkeeping lives beside it, not in it.
+STATE_DIR="$CONFIG_DIR/aws-toolkit"
 STAMP="$STATE_DIR/.skills-stamp"
 
 # Region drives BOTH the MCP endpoint host and the `aws agent-toolkit` calls. The
@@ -33,10 +36,17 @@ STAMP="$STATE_DIR/.skills-stamp"
 # ~/.claude/aws/config would fail every skill install with `NoRegion`. Never drop
 # the explicit --region.
 AWS_MCP_REGION="${AWS_MCP_REGION:-us-east-1}"
-# Read-only is the default posture: the MCP server runs with whatever IAM identity
-# is in ~/.claude/aws/credentials, and this sandbox should not mutate real AWS
-# infrastructure unless asked. Set AWS_MCP_READ_ONLY=0 (compose env) to allow writes.
-AWS_MCP_READ_ONLY="${AWS_MCP_READ_ONLY:-1}"
+# Space-separated profile names from ~/.claude/aws/config. The proxy takes a LIST:
+# the first is the server's default identity, and the remainder become selectable
+# per tool call through its `aws_profile` parameter — which is how one MCP server
+# spans several accounts in an AWS Organization. Empty omits --profile entirely and
+# falls back to the standard credential chain (AWS_PROFILE, env vars, SSO, ...).
+AWS_MCP_PROFILES="${AWS_MCP_PROFILES:-}"
+# WRITES ARE ENABLED BY DEFAULT (AWS_MCP_READ_ONLY=0). The MCP tools act with the
+# full IAM permissions of the selected profile and can create, modify and delete
+# real resources — in ANY account listed in AWS_MCP_PROFILES, not just the default
+# one. Set AWS_MCP_READ_ONLY=1 to pass --read-only and restrict it to describes.
+AWS_MCP_READ_ONLY="${AWS_MCP_READ_ONLY:-0}"
 # Whole-step wall-clock budget for skill downloads, so a degraded network can't
 # stretch boot by 23 sequential timeouts. An unfinished pass simply retries next boot.
 AWS_SKILLS_BUDGET="${AWS_SKILLS_BUDGET:-180}"
@@ -59,6 +69,14 @@ fi
 
 install -d -m 700 "$STATE_DIR"
 
+# One-time migration off the pre-`~/.aws`-symlink stamp location. Moving rather
+# than deleting keeps the "skills already installed" state, so an existing
+# container doesn't re-download all 23 skills just because the path changed.
+if [ -f "$CONFIG_DIR/aws/.skills-stamp" ] && [ ! -f "$STAMP" ]; then
+    mv "$CONFIG_DIR/aws/.skills-stamp" "$STAMP" 2>/dev/null || true
+fi
+rm -f "$CONFIG_DIR/aws/.skills-stamp"
+
 # ---------------------------------------------------------------------------
 # 1. MCP server registration — REGENERATED every boot, not copy-if-missing.
 # ---------------------------------------------------------------------------
@@ -73,14 +91,26 @@ proxy_args=("$MCP_ENDPOINT")
 if [ "$AWS_MCP_READ_ONLY" != "0" ]; then
     proxy_args+=(--read-only)
 fi
+# Word-splitting is intentional: AWS_MCP_PROFILES is a space-separated list and
+# `--profile` is variadic. Guarded by the emptiness test so an unset value can
+# never expand to a bare `--profile` with no argument.
+default_profile=""
+if [ -n "$AWS_MCP_PROFILES" ]; then
+    # shellcheck disable=SC2086
+    set -- $AWS_MCP_PROFILES
+    default_profile="$1"
+    proxy_args+=(--profile "$@")
+fi
 proxy_args+=(--metadata "AWS_REGION=${AWS_MCP_REGION}")
 
 claude mcp remove "$MCP_NAME" --scope user >/dev/null 2>&1 || true
 if claude mcp add --scope user "$MCP_NAME" -- \
         mcp-proxy-for-aws "${proxy_args[@]}" >/dev/null 2>&1; then
-    echo "[aws-toolkit] registered MCP server '${MCP_NAME}' -> ${MCP_ENDPOINT} (read_only=${AWS_MCP_READ_ONLY})"
+    echo "[aws-toolkit] registered MCP server '${MCP_NAME}' -> ${MCP_ENDPOINT}" \
+         "(read_only=${AWS_MCP_READ_ONLY}, profiles=${AWS_MCP_PROFILES:-<credential-chain>})"
     log_event aws aws.mcp.registered name "$MCP_NAME" region "$AWS_MCP_REGION" \
-        read_only "$AWS_MCP_READ_ONLY" endpoint "$MCP_ENDPOINT"
+        read_only "$AWS_MCP_READ_ONLY" endpoint "$MCP_ENDPOINT" \
+        profiles "${AWS_MCP_PROFILES:-}" default_profile "${default_profile:-}"
 else
     echo "[aws-toolkit] WARN: failed to register MCP server '${MCP_NAME}'" >&2
     log_event aws aws.mcp.failed name "$MCP_NAME" region "$AWS_MCP_REGION"
@@ -93,14 +123,23 @@ fi
 # `-32602: Invalid request parameters`. Detect it here and say the useful thing
 # instead. Absent credentials are a normal, user-fixable state, NOT a degraded
 # boot, so this never changes `status`; it is one bounded, read-only API call.
-if timeout 15 aws sts get-caller-identity --region "$AWS_MCP_REGION" \
-        --no-cli-pager >/dev/null 2>&1; then
-    log_event aws aws.credentials.ok region "$AWS_MCP_REGION"
+# Probe the profile the server will actually default to, not the ambient chain —
+# with a profile list configured those are different identities, and only the
+# default one determines whether the initial handshake succeeds.
+probe_args=(--region "$AWS_MCP_REGION" --no-cli-pager)
+[ -n "$default_profile" ] && probe_args+=(--profile "$default_profile")
+
+if timeout 15 aws sts get-caller-identity "${probe_args[@]}" >/dev/null 2>&1; then
+    log_event aws aws.credentials.ok region "$AWS_MCP_REGION" \
+        profile "${default_profile:-<credential-chain>}"
 else
-    echo "[aws-toolkit] NOTE: no usable AWS credentials — '${MCP_NAME}' will show as" >&2
-    echo "[aws-toolkit]       'Failed to connect' until you run \`aws sso login\` or" >&2
-    echo "[aws-toolkit]       \`aws configure\`. Skills below work regardless." >&2
-    log_event aws aws.credentials.absent region "$AWS_MCP_REGION"
+    echo "[aws-toolkit] NOTE: no usable AWS credentials for" \
+         "${default_profile:-the default credential chain} — '${MCP_NAME}' will show" >&2
+    echo "[aws-toolkit]       as 'Failed to connect' until you authenticate, e.g." >&2
+    echo "[aws-toolkit]       \`aws sso login --profile ${default_profile:-<profile>}\`." >&2
+    echo "[aws-toolkit]       Skills below work regardless." >&2
+    log_event aws aws.credentials.absent region "$AWS_MCP_REGION" \
+        profile "${default_profile:-<credential-chain>}"
 fi
 
 # ---------------------------------------------------------------------------
