@@ -44,6 +44,13 @@ services:
       # Firewall posture: strict (default) | permissive | dev
       FIREWALL_MODE: ${FIREWALL_MODE:-strict}
       TZ: ${TZ:-America/New_York}
+      # Agent Toolkit for AWS (init-aws-toolkit.sh). Region drives both the MCP
+      # endpoint host and the `aws agent-toolkit` skill-catalog calls. Read-only
+      # is the default posture: the AWS MCP Server acts as whatever IAM identity
+      # is in ~/.claude/aws/credentials, so writes are opt-in. Both take effect on
+      # the next container START (the MCP entry is re-registered every boot).
+      AWS_MCP_REGION: ${AWS_MCP_REGION:-us-east-1}
+      AWS_MCP_READ_ONLY: ${AWS_MCP_READ_ONLY:-1}
     volumes:
       - workspace:/workspace                                   # isolated code (no host path)
       - config:/home/claude/.claude                            # Claude state/auth/gh/git/CLAUDE.md

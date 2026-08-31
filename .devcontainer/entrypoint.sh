@@ -57,11 +57,16 @@ else
     log_event entrypoint update.failed
 fi
 
-# 4. Install the persisted crontab + start cron (scheduled Claude agents). After
+# 4. Agent Toolkit for AWS: register the pinned AWS MCP Server + seed AWS skills.
+#    After the update so it drives the current `claude` CLI, and after the firewall
+#    so the skill catalog is reachable. Non-fatal — the script also self-guards.
+/usr/local/bin/init-aws-toolkit.sh || { echo "[entrypoint] WARN: aws toolkit init failed (non-fatal)" >&2; log_event entrypoint aws.failed; }
+
+# 5. Install the persisted crontab + start cron (scheduled Claude agents). After
 #    the firewall so jobs that fire have egress; non-fatal so cron can't brick boot.
 /usr/local/bin/init-cron.sh || { echo "[entrypoint] WARN: cron init failed (non-fatal)" >&2; log_event entrypoint cron.failed; }
 
-# 5. Hand off to the container command (default: sleep infinity).
+# 6. Hand off to the container command (default: sleep infinity).
 echo "[entrypoint] ready — claude $(claude --version 2>/dev/null || echo '?'); attach with: docker exec -it claude-code zsh -l"
 log_event entrypoint entrypoint.ready
 exec "$@"

@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Agent Toolkit for AWS, wired up by default** — Claude now boots with live AWS
+  tools and AWS domain guidance, no manual setup. Two halves, both handled by the new
+  `init-aws-toolkit.sh` (entrypoint step 4, after `claude update`, before cron):
+  - **AWS MCP Server** — registers the `aws-mcp` stdio server pointing at the new
+    build-pinned `mcp-proxy-for-aws` (`ARG MCP_PROXY_FOR_AWS_VER=1.6.4`, installed via
+    `uv tool install` beside `ruff`), which SigV4-signs calls to AWS's hosted endpoint
+    `https://aws-mcp.<region>.api.aws/mcp`. Pinning at build time is deliberate: the
+    upstream docs suggest `uvx mcp-proxy-for-aws@X`, which would resolve from PyPI
+    every time the server starts — a supply-chain hole and a startup-latency hit.
+  - **Skills** — the 23-skill `aws-core` catalog set, pinned by version in the new
+    `seed/aws-skills.txt` manifest and installed to `~/.claude/skills` via the
+    `aws agent-toolkit` command group (already present in the pinned CLI 2.36.11,
+    which satisfies the toolkit's `>= 2.35.0` requirement — no CLI bump needed).
+  - **Credentials gate the whole server, not just its API tools.** The proxy signs
+    every request including `initialize`, so without resolvable credentials `aws-mcp`
+    fails to connect and Claude Code reports an opaque `-32602: Invalid request
+    parameters`. (Upstream docs say credential-free doc/skill discovery still works
+    over MCP; measured against 1.6.4 it does not.) The boot step therefore probes with
+    `aws sts get-caller-identity`, logs `aws.credentials.ok`/`.absent`, and prints a
+    "run `aws sso login`" hint — an absent credential is a normal, user-fixable state,
+    so it is reported, not treated as a degraded boot. Skills work regardless.
+  - **Read-only by default.** The proxy runs with `--read-only`, so the MCP tools can
+    inspect and price AWS resources but not mutate them — the server acts as whatever
+    IAM identity is in `~/.claude/aws/credentials`. Opt into writes with
+    `AWS_MCP_READ_ONLY=0`; pick a region with `AWS_MCP_REGION` (default `us-east-1`).
+  - **No firewall change was required.** Both `aws-mcp.<region>.api.aws` and the
+    `agent-toolkit.<region>.api.aws` skill catalog resolve into CloudFront prefixes
+    tagged `AMAZON`/region `GLOBAL`, which the existing `@aws-ip-ranges` directive
+    always keeps — verified against the live `ip-ranges.json` feed and in a strict-mode
+    boot, not assumed.
+  - The MCP entry is **re-registered on every boot** rather than seeded once: `~/.claude`
+    is a persistent volume, so a copy-if-missing entry would freeze the first boot's
+    proxy version and flags forever. Skills are gated on the SHA-256 of the manifest
+    (stamped at `~/.claude/aws/.skills-stamp`), so steady-state boots do no network I/O
+    and a deliberately removed skill stays removed. Every failure path is non-fatal and
+    still emits `aws.toolkit.ready`, which `make boot-check` now requires along with
+    `aws.mcp.registered`.
+
 ### Changed
 
 - **AWS CLI bumped `2.35.4` → `2.36.11`** (`install-tools.sh` `AWS_CLI_VER`). Routine
@@ -18,6 +58,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lives at `/usr/local/aws-cli` (not a named volume), so picking this up requires a
   container **recreate**, not a restart; credentials are unaffected either way since
   `AWS_CONFIG_FILE`/`AWS_SHARED_CREDENTIALS_FILE` point into the `claude-config` volume.
+
+### Fixed
+
+- **`make smoke` / CI asserted against a still-booting container.** Both waited for
+  `~/.claude/ENVIRONMENT.md`, which the seed step writes at **step 2 of 6** — before
+  `claude update`, the AWS toolkit, and cron. Every assertion after that wait was
+  racing the rest of the boot; it only ever passed because the checks happened to
+  target step-1/2 artifacts. Both now wait for `pgrep -x cron`, the last step before
+  `exec` (and the same liveness proxy the compose healthcheck uses). Surfaced by the
+  new AWS assertion, which runs later in the pipeline and so lost the race reliably.
+- **`jq -e 'select(...)'` is not a membership test.** With `-e`, jq's exit status
+  reflects only the **last input line**, so the boot-journal probes passed purely
+  because `entrypoint.ready` happens to be the journal's final event — the same idiom
+  returns exit 4 for any event that isn't last. Replaced with
+  `jq -se 'any(.[]; .event=="…")'` in the `boot-check` wait loop and the new smoke/CI
+  assertions.
 
 ## [0.2.3] - 2026-06-15
 

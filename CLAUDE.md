@@ -30,11 +30,13 @@ self-documented — each carries a trailing `## …` description.
 ## Startup order (load-bearing)
 `ENTRYPOINT` = `entrypoint.sh`, in order: (1) `sudo init-firewall.sh`,
 (2) `seed-claude.sh`, (3) `claude update` (bounded by `timeout`, non-fatal),
-(4) `init-cron.sh`, then execs the compose `command` (`sleep infinity`). Ordering
-matters — the firewall must be up before the auto-update reaches
-`downloads.claude.ai` and before cron jobs fire. The VS Code path re-runs
-firewall + update + cron via `devcontainer.json` `postStartCommand` as an
-idempotent safety net.
+(4) `init-aws-toolkit.sh`, (5) `init-cron.sh`, then execs the compose `command`
+(`sleep infinity`). Ordering matters — the firewall must be up before the
+auto-update reaches `downloads.claude.ai`, before the AWS skill catalog is
+fetched, and before cron jobs fire; the AWS step runs after the update so it
+drives the current `claude` CLI. The VS Code path re-runs firewall + update +
+aws-toolkit + cron via `devcontainer.json` `postStartCommand` as an idempotent
+safety net.
 
 ## Cross-file invariants
 - **User is `claude`** (uid 1000, renamed from the base image's `node`). The name
@@ -80,6 +82,10 @@ cron env, db lifecycle, boot-event trail).
   `config/extra-allowlist.txt`).
 - `entrypoint.sh` / `seed-claude.sh` — startup orchestration + `~/.claude` seeding;
   `log-event.sh` — boot-event JSONL trail.
+- `init-aws-toolkit.sh` + `seed/aws-skills.txt` — Agent Toolkit for AWS: registers
+  the `aws-mcp` MCP server (build-pinned `mcp-proxy-for-aws`, read-only by default)
+  and installs the pinned `aws-core` skill set. Knobs: `AWS_MCP_REGION`,
+  `AWS_MCP_READ_ONLY`.
 - `init-cron.sh` + `crontab-edit` / `crontab-reload` — persisted crontab (don't
   shadow the real `crontab`); template `seed/crontab`.
 - `home/` — baked zsh dotfiles. `seed/CLAUDE.md` — the **in-container** orientation

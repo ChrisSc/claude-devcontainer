@@ -77,6 +77,13 @@ Regenerated at container start by \`seed-claude.sh\`. See CLAUDE.md for guidance
 - claude: $(ver claude --version)
 - config dir: $CONFIG_DIR
 
+## Agent Toolkit for AWS (registered at boot by \`init-aws-toolkit.sh\`)
+- MCP server: \`aws-mcp\` -> https://aws-mcp.${AWS_MCP_REGION:-us-east-1}.api.aws/mcp
+- proxy: $(uv tool list 2>/dev/null | grep -m1 "^mcp-proxy-for-aws" || echo "mcp-proxy-for-aws n/a")
+- region: ${AWS_MCP_REGION:-us-east-1} | read-only: ${AWS_MCP_READ_ONLY:-1} (set AWS_MCP_READ_ONLY=0 + restart to allow writes)
+- skills: pinned in /usr/local/share/claude-seed/aws-skills.txt, installed to $CONFIG_DIR/skills
+- AWS API tools need credentials — run \`aws configure\` or \`aws sso login\`
+
 ## Database (Postgres sidecar — opt-in via the \`db\` compose profile)
 - DATABASE_URL: $([ -n "${DATABASE_URL:-}" ] && echo "set" || echo "unset (db profile not active / .env absent)")
 - PGHOST: ${PGHOST:-unset}
