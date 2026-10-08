@@ -300,12 +300,28 @@ if [ -z "$DNS_SERVERS" ]; then
     DNS_SERVERS="127.0.0.11"
     warn "no nameserver in /etc/resolv.conf — scoping DNS to 127.0.0.11 only"
 fi
+allow_dns() {
+    iptables -A OUTPUT -p udp -d "$1" --dport 53 -j ACCEPT
+    iptables -A OUTPUT -p tcp -d "$1" --dport 53 -j ACCEPT
+    log "DNS egress allowed to $1${2:+ ($2)}"
+}
 while read -r dns; do
     is_ipv4_cidr "$dns" || continue
-    iptables -A OUTPUT -p udp -d "$dns" --dport 53 -j ACCEPT
-    iptables -A OUTPUT -p tcp -d "$dns" --dport 53 -j ACCEPT
-    log "DNS egress allowed to ${dns}"
+    allow_dns "$dns"
 done <<< "$DNS_SERVERS"
+# Docker's embedded resolver forwards to the upstreams in its generated
+# `# ExtServers: [...]` comment. A `host(x)` entry (Docker Desktop's default) is
+# dialed from the HOST namespace and needs no rule; a plain entry — what compose
+# `dns:` produces — is dialed from INSIDE this netns, so without an allow the
+# OUTPUT DROP below turns every lookup into SERVFAIL. These are recursive
+# resolvers 127.0.0.11 already forwards everything to, so this adds no tunnel
+# surface; DNS to any other destination stays dropped.
+EXT_DNS_SERVERS="$(sed -n 's/^# ExtServers: \[\(.*\)\]$/\1/p' /etc/resolv.conf \
+    2>/dev/null | tr ' ' '\n' || true)"
+while read -r dns; do
+    is_ipv4_cidr "$dns" || continue   # skips host(...) entries and IPv6
+    allow_dns "$dns" "embedded-resolver upstream"
+done <<< "$EXT_DNS_SERVERS"
 iptables -A INPUT  -i lo -j ACCEPT
 iptables -A OUTPUT -o lo -j ACCEPT
 # NOTE: there is intentionally no blanket tcp/22 (SSH) allow. git-over-SSH to
@@ -506,6 +522,12 @@ if curl --connect-timeout 5 -fsS https://example.com >/dev/null 2>&1; then
     exit 1
 fi
 log "verified: example.com is blocked"
+
+# DNS must survive the clamp. Checked separately so a resolver problem isn't
+# misreported below as "GitHub ranges may have failed to load".
+if ! getent ahostsv4 api.github.com >/dev/null 2>&1; then
+    warn "DNS lookups fail after the clamp — check the ExtServers allow above"
+fi
 
 if ! curl --connect-timeout 5 -fsS https://api.github.com/zen >/dev/null 2>&1; then
     warn "api.github.com unreachable — GitHub ranges may have failed to load"

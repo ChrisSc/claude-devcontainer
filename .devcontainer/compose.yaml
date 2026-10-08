@@ -32,6 +32,17 @@ services:
     sysctls:
       net.ipv6.conf.all.disable_ipv6: "1"
       net.ipv6.conf.default.disable_ipv6: "1"
+    # Upstreams for Docker's embedded resolver (127.0.0.11 stays the container's
+    # nameserver). Without this, Docker Desktop forwards through the host OS
+    # resolver, which on a lossy link caches an upstream timeout as NXDOMAIN —
+    # `github.com` (60s TTL, re-queried constantly) then fails hard with "Could
+    # not resolve host" while long-TTL hosts keep working. Explicit upstreams are
+    # dialed from INSIDE the container netns, so init-firewall.sh allows udp+tcp/53
+    # to them (read from resolv.conf's `# ExtServers:` line) — edit only here.
+    # Needs a container RECREATE (`up -d` / `make rebuild`), not a restart.
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     user: claude
     init: true                       # docker-init as PID1: reaps zombies, forwards signals
     working_dir: /workspace

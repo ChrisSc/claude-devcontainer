@@ -340,6 +340,14 @@ That's the firewall's `REJECT` rule — the destination IP isn't in the
 while `:443` connects fail. Fix by allowlisting the host (see Network posture) and re-running
 `make firewall`.
 
+**Symptom: `Could not resolve host: github.com`, while `api.github.com` and other
+hosts resolve fine.** On Docker Desktop, the container's resolver forwards through
+the host OS resolver by default, which can cache a dropped upstream query as
+NXDOMAIN; `github.com` (60s TTL) hits that far more than long-TTL hosts. The
+`dns:` upstreams in `compose.yaml` (8.8.8.8 / 8.8.4.4) bypass that layer, and
+`init-firewall.sh` allows port 53 to exactly those upstreams. If you changed them
+or your container predates them, recreate it: `make rebuild`.
+
 **Symptom: `make firewall` itself times out fetching `api.github.com/meta`**, and
 afterwards GitHub (and anything covered by GitHub's IP ranges) is unreachable.
 This was a bug fixed in `init-firewall.sh`: `iptables -F` flushes rules but *not*
