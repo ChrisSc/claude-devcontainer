@@ -213,6 +213,9 @@ A shared Postgres server with the `vector` extension runs as a sidecar
 - Data persists in the `claude-pgdata` volume (survives rebuilds; `make nuke` /
   `make db-reset` destroy it). Back up with `make db-dump` -> ./db-backups (host).
 - If `db` won't resolve/connect, the sidecar likely isn't running: `make db-up`.
+- **pgAdmin** (`claude-pgadmin`, opt-in via `make pgadmin-up` on the host) is a web
+  UI for the human at `http://localhost:5050` on the host. Its login is in the
+  host-only `.devcontainer/pgadmin.env`. You don't need it; use `psql`.
 
 ## 11. Scheduled agents (cron)
 Run Claude agents on a schedule. `cron` is installed and its daemon starts at boot.

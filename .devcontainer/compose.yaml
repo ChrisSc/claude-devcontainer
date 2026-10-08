@@ -150,6 +150,85 @@ services:
       retries: 5
       start_period: 30s
 
+  # pgAdmin 4 web UI for the db sidecar. Same `db` profile, so the profile-aware
+  # teardown targets (stop/down/nuke) cover it, but it only starts on request
+  # (`make pgadmin-up`; `make db-up` starts the db alone). Joins the project's
+  # default network like every service here, so it reaches the server as `db:5432`.
+  pgadmin:
+    # Tag + multi-arch index digest: the tag documents the version, the digest
+    # pins it (upstream re-pushes tags). Bump both together.
+    # yamllint disable-line rule:line-length
+    image: dpage/pgadmin4:9.18.0@sha256:c332c5f6dfba995d9ebc4af261d93506d6876085d712eaaa3defc8dd1a3f26de
+    container_name: claude-pgadmin
+    profiles: [db]
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    # Login secret ONLY — deliberately NOT the shared .env, which would inject
+    # the AWS knobs and the libpq client vars into a web app that needs neither.
+    # The db password reaches pgAdmin solely through the pgpass config below.
+    env_file:
+      - path: pgadmin.env
+        required: false
+    environment:
+      # Pre-register the db sidecar (servers.json) and auto-authenticate it
+      # (pgpass). The entrypoint imports both ONLY on first init of the
+      # claude-pgadmin volume, the same rule as the db password. After rotating
+      # the db password, `make pgadmin-reset` re-imports them.
+      PGADMIN_SERVER_JSON_FILE: /pgadmin4/servers.json
+      PGPASS_FILE: /pgadmin4/pgpass
+      # No egress the UI doesn't need: skip the pgadmin.org version check and
+      # the bundled postfix (password-reset mail; it also needs sudo, which
+      # no-new-privileges below blocks anyway).
+      PGADMIN_CONFIG_UPGRADE_CHECK_ENABLED: "False"
+      PGADMIN_DISABLE_POSTFIX: "1"
+      # 8080, not the image's default 80: with every capability dropped the
+      # entrypoint cannot bind a privileged port (it would fall back to 8080 on
+      # its own; pinning it keeps the port mapping below explicit).
+      PGADMIN_LISTEN_PORT: "8080"
+    configs:
+      - source: pgadmin-servers
+        target: /pgadmin4/servers.json
+      - source: pgadmin-pgpass
+        target: /pgadmin4/pgpass
+        uid: "5050"                  # the image's pgadmin user; default is 0444 root
+        mode: 0400
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "127.0.0.1:5050:8080"        # localhost only — same posture as the db
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/misc/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+# Inline (not files on disk) so they interpolate the db credentials from .env
+# at create time; nothing new to generate or gitignore. `:-` defaults keep
+# `docker compose config` quiet before `make env` has run.
+configs:
+  pgadmin-servers:
+    content: |
+      {"Servers": {"1": {
+        "Name": "claude-db",
+        "Group": "Servers",
+        "Host": "db",
+        "Port": 5432,
+        "MaintenanceDB": "${POSTGRES_DB:-claude}",
+        "Username": "${POSTGRES_USER:-claude}",
+        "ConnectionParameters": {"sslmode": "prefer", "connect_timeout": 10, "passfile": "/.pgpass"}
+      }}}
+  # The entrypoint copies PGPASS_FILE to <storage dir>/.pgpass, which is where
+  # the servers.json "passfile": "/.pgpass" resolves in server mode.
+  pgadmin-pgpass:
+    content: |
+      db:5432:*:${POSTGRES_USER:-claude}:${POSTGRES_PASSWORD:-}
+
 volumes:
   workspace:
     name: claude-workspace
@@ -161,3 +240,5 @@ volumes:
     name: claude-pnpm-store
   pgdata:
     name: claude-pgdata
+  pgadmin-data:
+    name: claude-pgadmin

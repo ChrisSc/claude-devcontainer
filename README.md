@@ -238,10 +238,37 @@ make db-down                # stop it (data volume preserved)
 - **Secret:** a strong password is generated into `.devcontainer/.env` (gitignored,
   `0600`) by `make env`/`db-up` and injected into both containers — never
   committed, never hardcoded. It's baked into the data volume on first init;
-  rotating it means `make db-reset` (destroys data). `.env.example` is the tracked
-  template.
+  rotating it means `make db-reset` (destroys data), plus `make pgadmin-reset` if
+  you use pgAdmin. `.env.example` is the tracked template.
 - **Persistence:** data lives in the `claude-pgdata` volume (survives rebuilds;
   `make nuke`/`make db-reset` destroy it).
+
+### pgAdmin (web UI)
+
+An optional [pgAdmin 4](https://www.pgadmin.org/) container (`claude-pgadmin`)
+joins the same compose network and talks to the sidecar as `db:5432`:
+
+```bash
+make pgadmin-up      # starts pgAdmin (and the db, if it isn't running)
+make pgadmin-down    # stop it (saved state preserved)
+make pgadmin-reset   # wipe pgAdmin's state and re-import the server
+```
+
+- **Open** <http://localhost:5050>. It's published on the host loopback only, like
+  the db. `make db-up` does *not* start pgAdmin; it's in the same `db` profile, so
+  `make stop`/`down`/`nuke` cover it.
+- **Login:** `claude@example.com`, with the password from `PGADMIN_DEFAULT_PASSWORD`
+  in `.devcontainer/pgadmin.env`. `make env` generates that file (gitignored,
+  `0600`). It's separate from `.env`, so the pgAdmin password is never injected
+  into `claude-code` or the db.
+- **Zero-setup connection:** the `claude-db` server is pre-registered, with a
+  pgpass built from `.env`, so it connects without asking for the DB password.
+- **First start only:** like the DB password, the login and the server import
+  apply only when the `claude-pgadmin` volume is first initialized. After
+  changing `.env` or `pgadmin.env`, run `make pgadmin-reset`.
+- **Hardened:** the image is pinned by digest, all capabilities are dropped,
+  `no-new-privileges` is set, and the update check and bundled mail server are
+  disabled.
 
 ## Scheduled agents (cron)
 
@@ -349,6 +376,7 @@ to an IP not captured at boot. Re-run `make firewall` to refresh the resolved IP
   init-cron.sh         crontab-reload  crontab-edit      # scheduled agents (cron)
   gen-env.sh           gen-allowlist.sh   db-init/10-pgvector.sql
   config/extra-allowlist.txt.example    .env.example   # real files generated, gitignored
+  pgadmin.env          # generated pgAdmin login (gitignored; no template needed)
   home/.zshrc          home/.config/{starship.toml,zsh/aliases.zsh}
   seed/CLAUDE.md       seed/crontab    # seeded into ~/.claude/ on first start
 ```

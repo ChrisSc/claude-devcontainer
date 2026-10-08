@@ -77,7 +77,7 @@ safety net.
 Before editing any script in `.devcontainer/` (firewall, build/supply-chain, cron,
 db, observability), read **`.devcontainer/CLAUDE.md`** — it holds the per-subsystem
 errata (firewall fail-closed / IPv6 / DNS-scoping / SSH-via-ipset, pinning gates,
-cron env, db lifecycle, boot-event trail).
+cron env, db lifecycle, pgAdmin first-init import, boot-event trail).
 
 ## File map
 - `.devcontainer/Dockerfile` + `install-tools.sh` — build-time installs (pinned +
@@ -96,8 +96,9 @@ cron env, db lifecycle, boot-event trail).
   shadow the real `crontab`); template `seed/crontab`.
 - `home/` — baked zsh dotfiles. `seed/CLAUDE.md` — the **in-container** orientation
   doc (different audience: the Claude *using* the sandbox, not editing this repo).
-- DB: `gen-env.sh` (generates the gitignored `.env`; `.env.example` is the
-  template), `db-init/` (initdb scripts — pgvector in `template1`).
+- DB: `gen-env.sh` (generates the gitignored `.env` + `pgadmin.env`; `.env.example`
+  is the template), `db-init/` (initdb scripts — pgvector in `template1`). `db` and
+  the `pgadmin` web UI are compose services in the opt-in `db` profile.
 - Repo root: `Makefile`, `.github/workflows/ci.yaml`, the lint configs, `SECURITY.md`.
 
 ## Editing notes
