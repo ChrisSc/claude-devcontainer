@@ -2,10 +2,12 @@
 COMPOSE  := docker compose -f .devcontainer/compose.yaml
 COMPOSEDB := $(COMPOSE) --profile db
 ENV_FILE := .devcontainer/.env
+PGADMIN_ENV_FILE := .devcontainer/pgadmin.env
 
 .PHONY: up shell rebuild logs stop down nuke firewall doctor cp-skill \
         cron-reload cron-log lint smoke boot-check \
-        env allowlist db-up db-down db-psql db-logs db-create db-dump db-reset
+        env allowlist db-up db-down db-psql db-logs db-create db-dump db-reset \
+        pgadmin-up pgadmin-down pgadmin-reset
 
 # Shell scripts that ARE the deliverable (the same set CI shellchecks).
 SHELL_SCRIPTS := $(wildcard .devcontainer/*.sh) \
@@ -180,3 +182,22 @@ db-reset:  ## DESTROY the db data volume and re-init (e.g. after rotating the pa
 	docker volume rm claude-pgdata
 	$(COMPOSEDB) up -d db
 	@echo "db reset — fresh data volume initialized with the current .env password"
+
+# --- pgAdmin (web UI for the db sidecar) ----------------------------------
+
+pgadmin-up: env  ## Start pgAdmin (and the db it needs) at http://localhost:5050
+	$(COMPOSEDB) up -d pgadmin
+	@echo "pgAdmin -> http://localhost:5050 (first start takes ~30s)"
+	@echo "  login: $$(sed -n 's/^PGADMIN_DEFAULT_EMAIL=//p' $(PGADMIN_ENV_FILE)) / PGADMIN_DEFAULT_PASSWORD in $(PGADMIN_ENV_FILE)"
+	@echo "  server 'claude-db' is pre-registered and connects without a password prompt"
+
+pgadmin-down: ## Stop & remove the pgAdmin container (its state volume preserved)
+	$(COMPOSEDB) rm -sf pgadmin
+
+pgadmin-reset: ## DESTROY pgAdmin's saved state and re-init (after rotating the db password or pgadmin.env)
+	@printf 'This deletes pgAdmin state (volume claude-pgadmin: login, query history, prefs). Continue? [y/N] '; \
+	  read ans; [ "$$ans" = "y" ] || { echo aborted; exit 1; }
+	$(COMPOSEDB) rm -sf pgadmin
+	docker volume rm -f claude-pgadmin
+	$(COMPOSEDB) up -d pgadmin
+	@echo "pgAdmin reset — re-imported claude-db with the current .env / pgadmin.env credentials"

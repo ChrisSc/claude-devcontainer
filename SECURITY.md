@@ -36,7 +36,10 @@ any dev container you run locally.
   host-editable, but it **is** writable from inside the container, so anything that
   can write that file can schedule unattended jobs.
 - **DB secret** is generated locally into the gitignored `.devcontainer/.env`
-  (`0600`) and is never committed.
+  (`0600`) and is never committed. The optional **pgAdmin** UI has its own
+  generated login in `.devcontainer/pgadmin.env` (same handling). It is published on
+  the host loopback only (`127.0.0.1:5050`) and connects to the db without a
+  password prompt, so **anyone holding the pgAdmin login has full DB access**.
 
 ## Explicitly out of scope
 

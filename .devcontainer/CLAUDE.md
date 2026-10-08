@@ -200,6 +200,27 @@ Claude that *uses* the sandbox, not the one editing this repo.)
   mount root) and `PGHOST: ""` (the shared `.env` injects `PGHOST=db` into the
   server container too, which would point its healthcheck at itself).
 
+## pgAdmin (`compose.yaml` `pgadmin`, `gen-env.sh`, Makefile `pgadmin-*`)
+- **Own secret file, not `.env`.** `pgadmin.env` is pgadmin's only `env_file`.
+  Moving the login into `.env` would inject it into claude-code/db and change
+  their config hash, which recreates both on the next `up`. The db password
+  reaches pgAdmin only through the interpolated `pgadmin-pgpass` config.
+  `gen-env.sh` creates each file independently, so existing installs gain it.
+- **Imported on FIRST INIT ONLY.** The entrypoint creates the login, loads
+  `servers.json`, and copies `PGPASS_FILE` to `storage/<email, @→_>/.pgpass`
+  (where `"passfile": "/.pgpass"` resolves in server mode), all only while
+  `pgadmin4.db` is absent. A recreate changes none of it; `make pgadmin-reset`
+  does. Don't add `PGADMIN_REPLACE_SERVERS_ON_STARTUP`: its `--replace` clears
+  every server the user added in the UI.
+- **Port 8080 is tied to `cap_drop: [ALL]` + `no-new-privileges`.** Both defeat
+  the file-capped python that binds :80, and the same setting blocks `sudo`
+  (hence postfix off). Keep `PGADMIN_LISTEN_PORT`, the `5050:8080` mapping and
+  the healthcheck URL in sync.
+- The pgpass config's `uid: "5050"` + `mode: 0400` are load-bearing: compose's
+  default is `0444 root`, which leaves the db password world-readable. The login
+  email must pass pgAdmin's validator: it rejects `.local`/`.test`/`localhost`,
+  while the reserved `example.com` passes.
+
 ## Observability (`log-event.sh`)
 - **Boot emits a JSONL event trail.** `log-event.sh` (fire-and-forget; sourced by
   entrypoint/firewall/seed/cron with a no-op fallback) appends ts/seq/boot_id/phase/

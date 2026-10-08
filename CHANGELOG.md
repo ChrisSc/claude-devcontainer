@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **pgAdmin 4 web UI for the db sidecar** (`claude-pgadmin`). It sits on the same
+  compose network and reaches the server as `db:5432`, and it's published to the host
+  loopback only, at <http://localhost:5050>. It's in the existing `db` profile, so
+  the profile-aware `stop`/`down`/`nuke` targets cover it, but it starts only on
+  request: `make pgadmin-up`, `pgadmin-down`, `pgadmin-reset` (`make db-up` still
+  starts the db alone).
+  - **Pre-registered, password-free connection.** The `claude-db` server
+    (`servers.json`) and a pgpass are inline compose `configs`, filled in from
+    `.env` when the container is created. The entrypoint copies the pgpass into
+    pgAdmin's per-user storage, so the server connects without asking for the DB
+    password. Nothing new is tracked. The pgpass is mounted `0400` and owned by
+    pgAdmin's user, not left world-readable.
+  - **Separate login secret.** `gen-env.sh` now also generates
+    `.devcontainer/pgadmin.env` (gitignored, `0600`, also excluded from the build
+    context) holding `PGADMIN_DEFAULT_PASSWORD`, with the fixed login
+    `claude@example.com`. It's separate from `.env` for two reasons: the shared file
+    would push the pgAdmin password into `claude-code` and the db, and an existing
+    `.env` would have needed rewriting. Existing installs get the new file on the
+    next `make env`/`up`.
+  - **First start only, like the DB password.** The login, the server import and
+    the pgpass apply only on first init of the `claude-pgadmin` volume. After
+    rotating the DB password or editing `pgadmin.env`, run `make pgadmin-reset`.
+  - **Hardened.** The image is `dpage/pgadmin4:9.18.0` pinned by index digest
+    (upstream re-pushes tags; `9.17.0` currently points at the 9.18 image). The
+    container runs with `cap_drop: [ALL]` and `no-new-privileges`, listens on 8080
+    (dropping all capabilities rules out port 80), and has the pgadmin.org update
+    check and the bundled postfix disabled. The healthcheck hits `/misc/ping`.
+
 - **Agent Toolkit for AWS, wired up by default** — Claude now boots with live AWS
   tools and AWS domain guidance, no manual setup. Two halves, both handled by the new
   `init-aws-toolkit.sh` (entrypoint step 4, after `claude update`, before cron):

@@ -26,5 +26,7 @@
 !config/extra-allowlist.txt
 !config/extra-allowlist.txt.example
 
-# Belt-and-suspenders: never ship the DB secret even if a re-include above widens.
+# Belt-and-suspenders: never ship the DB or pgAdmin secrets even if a re-include
+# above widens.
 .env
+pgadmin.env
