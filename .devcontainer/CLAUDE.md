@@ -25,7 +25,14 @@ Claude that *uses* the sandbox, not the one editing this repo.)
   dual-stack host reaches every AAAA destination unfiltered.
 - **DNS is scoped to the resolver; SSH rides the ipset — both deliberate.** strict
   mode allows udp+tcp/53 ONLY to the `/etc/resolv.conf` nameservers (127.0.0.11
-  fallback), NOT any-destination; and there is NO blanket `--dport 22` rule —
+  fallback) plus the embedded resolver's plain `# ExtServers:` upstreams, NOT
+  any-destination. Those upstreams come from compose `dns:` (8.8.8.8/8.8.4.4) and
+  Docker dials them from the *container* netns — drop that allow and strict mode
+  SERVFAILs every lookup (`host(x)` upstreams are dialed host-side, need no rule).
+  `dns:` itself is load-bearing: Docker Desktop's default forwarder goes through
+  the host OS resolver, which caches upstream timeouts as NXDOMAIN — short-TTL
+  `github.com` then fails ("Could not resolve host") while other hosts work.
+  And there is NO blanket `--dport 22` rule —
   git-over-SSH reaches github.com because the OUTPUT match-set rule allows ALL
   ports to `allowed-domains` IPs. Don't "restore" a blanket udp/53 or tcp/22 allow
   as a perceived omission; those are exfil channels the hardening removed on purpose.
